@@ -6,9 +6,10 @@ import os
 from datetime import datetime
 import json
 from pathlib import Path
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from PIL import Image as PILImage
 import asyncio
+import io
 
 app = FastAPI(title="Image Service API")
 
@@ -50,8 +51,20 @@ class CaptionRequest(BaseModel):
 class CaptionResponse(BaseModel):
     caption: str
 
+class CropBox(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+class CropRequest(BaseModel):
+    imageId: str
+    targetSize: int
+    cropBox: CropBox
+
 # Configuration
 IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
+#IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
 IMAGES_PER_PAGE = 10
 
 # Ensure images directory exists
@@ -63,6 +76,11 @@ def get_image_dimensions(image_path: Path) -> tuple[Optional[int], Optional[int]
             return img.size
     except Exception:
         return None, None
+
+def get_image_path(image_id: str) -> Optional[Path]:
+    """Get the full path of an image file by its ID."""
+    image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+    return image_files[0] if image_files else None
 
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
@@ -201,7 +219,84 @@ async def generate_caption(image_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+def get_cropped_image(image: PILImage, target_size: int):
+    # Calculate scaling factor to fit within target size
+    width, height = image.size
+    scale = max(target_size / width, target_size / height)
+    new_size = (int(width * scale), int(height * scale))
+    
+    # Resize the image
+    resized = image.resize(new_size, PILImage.Resampling.LANCZOS)
+
+    return resized
+
+@app.get("/images/{image_id}/preview/{target_size}")
+async def get_image_preview(image_id: str, target_size: int):
+    """
+    Get a scaled preview of the image that fits within the target size while maintaining aspect ratio.
+    The image will be scaled down so that the smaller size fits the target, but cropping will be required to make it a square
+    """
+    try:
+        image_path = get_image_path(image_id)
+        if not image_path:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        with PILImage.open(image_path) as img:
+            resized = get_cropped_image(img, target_size)
+            
+            # Convert to bytes
+            img_byte_arr = io.BytesIO()
+            resized.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+            
+            return Response(content=img_byte_arr.getvalue(), media_type="image/png")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/images/{image_id}/crop")
+async def crop_image(image_id: str, crop_request: CropRequest):
+    """
+    Crop an image according to the specified crop box and target size.
+    The crop box coordinates are given for the scaled down image.
+    """
+    try:
+        image_path = get_image_path(image_id)
+        if not image_path:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        with PILImage.open(image_path) as img:
+            # First resize the image to fit within target size
+            resized = get_cropped_image(img, crop_request.targetSize)
+            resized_width, resized_height = resized.size
+            
+            # Ensure crop box is within resized image bounds
+            crop_x = max(0, min(crop_request.cropBox.x, resized_width - 1))
+            crop_y = max(0, min(crop_request.cropBox.y, resized_height - 1))
+            crop_width = min(crop_request.cropBox.width, resized_width - crop_x)
+            crop_height = min(crop_request.cropBox.height, resized_height - crop_y)
+
+            print(f"Crop properties:")
+            print(f"  x: {crop_x}")
+            print(f"  y: {crop_y}")
+            print(f"  width: {crop_width}")
+            print(f"  height: {crop_height}")
+            print(f"  resized dimensions: {resized_width}x{resized_height}")
+            
+            # Perform the crop on the resized image
+            cropped = resized.crop((crop_x, crop_y, crop_x + crop_width, crop_y + crop_height))
+            
+            # Convert to bytes
+            img_byte_arr = io.BytesIO()
+            cropped.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+            
+            return Response(content=img_byte_arr.getvalue(), media_type="image/png")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="192.168.68.59", port=4322)
