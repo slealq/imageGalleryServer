@@ -1,13 +1,14 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import os
 from datetime import datetime
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse
 from PIL import Image as PILImage
+import asyncio
 
 app = FastAPI(title="Image Service API")
 
@@ -20,6 +21,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# In-memory storage for captions
+image_captions: Dict[str, str] = {}
+
 # Models
 class ImageMetadata(BaseModel):
     id: str
@@ -29,6 +33,9 @@ class ImageMetadata(BaseModel):
     mime_type: str
     width: Optional[int] = None
     height: Optional[int] = None
+    has_caption: bool = False
+    collection_name: str = "Default Collection"
+    has_tags: bool = False
 
 class ImageResponse(BaseModel):
     images: List[ImageMetadata]
@@ -36,6 +43,12 @@ class ImageResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+class CaptionRequest(BaseModel):
+    caption: str
+
+class CaptionResponse(BaseModel):
+    caption: str
 
 # Configuration
 IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
@@ -78,14 +91,18 @@ async def get_images(
         for img_file in page_images:
             stat = img_file.stat()
             width, height = get_image_dimensions(img_file)
+            image_id = str(img_file.stem)
             metadata = ImageMetadata(
-                id=str(img_file.stem),
+                id=image_id,
                 filename=img_file.name,
                 size=stat.st_size,
                 created_at=datetime.fromtimestamp(stat.st_ctime),
                 mime_type=f"image/{img_file.suffix[1:].lower()}" if img_file.suffix else "application/octet-stream",
                 width=width,
-                height=height
+                height=height,
+                has_caption=image_id in image_captions,
+                collection_name="Default Collection",  # Dummy data for now
+                has_tags=False  # Dummy data for now
             )
             images_metadata.append(metadata)
         
@@ -113,6 +130,72 @@ async def get_image(image_id: str):
         
         image_file = image_files[0]
         return FileResponse(image_file)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/images/{image_id}/caption")
+async def save_caption(image_id: str, caption_request: CaptionRequest):
+    """
+    Save a caption for an image
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Save caption
+        image_captions[image_id] = caption_request.caption
+        return {"message": "Caption saved successfully"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/images/{image_id}/caption", response_model=CaptionResponse)
+async def get_caption(image_id: str):
+    """
+    Get the caption for an image
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Get caption
+        caption = image_captions.get(image_id)
+        if not caption:
+            raise HTTPException(status_code=404, detail="No caption found for this image")
+        
+        return CaptionResponse(caption=caption)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/images/{image_id}/generate-caption", response_model=CaptionResponse)
+async def generate_caption(image_id: str):
+    """
+    Generate a caption for an image (dummy implementation)
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Simulate processing time
+        await asyncio.sleep(5)
+        
+        # Generate dummy caption
+        dummy_caption = f"This is a generated caption for image {image_id}"
+        return CaptionResponse(caption=dummy_caption)
     
     except HTTPException:
         raise
