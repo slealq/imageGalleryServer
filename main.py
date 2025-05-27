@@ -37,6 +37,7 @@ class ImageMetadata(BaseModel):
     has_caption: bool = False
     collection_name: str = "Default Collection"
     has_tags: bool = False
+    has_crop: bool = False
 
 class ImageResponse(BaseModel):
     images: List[ImageMetadata]
@@ -120,7 +121,8 @@ async def get_images(
                 height=height,
                 has_caption=image_id in image_captions,
                 collection_name="Default Collection",  # Dummy data for now
-                has_tags=False  # Dummy data for now
+                has_tags=False,  # Dummy data for now
+                has_crop=False  # Dummy data for now
             )
             images_metadata.append(metadata)
         
