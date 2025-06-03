@@ -52,20 +52,18 @@ class CaptionRequest(BaseModel):
 class CaptionResponse(BaseModel):
     caption: str
 
-class CropBox(BaseModel):
-    x: int
-    y: int
-    width: int
-    height: int
+class NormalizedDeltas(BaseModel):
+    x: float
+    y: float
 
 class CropRequest(BaseModel):
     imageId: str
     targetSize: int
-    cropBox: CropBox
+    normalizedDeltas: NormalizedDeltas
 
 # Configuration
-IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
-#IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
+# IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
+IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
 IMAGES_PER_PAGE = 10
 
 # Ensure images directory exists
@@ -260,8 +258,7 @@ async def get_image_preview(image_id: str, target_size: int):
 @app.post("/images/{image_id}/crop")
 async def crop_image(image_id: str, crop_request: CropRequest):
     """
-    Crop an image according to the specified crop box and target size.
-    The crop box coordinates are given for the scaled down image.
+    Crop an image according to the specified deltas and target size.
     """
     try:
         image_path = get_image_path(image_id)
@@ -271,28 +268,30 @@ async def crop_image(image_id: str, crop_request: CropRequest):
         with PILImage.open(image_path) as img:
             # First resize the image to fit within target size
             resized = get_cropped_image(img, crop_request.targetSize)
-            resized_width, resized_height = resized.size
             
-            # Ensure crop box is within resized image bounds
-            crop_x = max(0, min(crop_request.cropBox.x, resized_width - 1))
-            crop_y = max(0, min(crop_request.cropBox.y, resized_height - 1))
-            crop_width = min(crop_request.cropBox.width, resized_width - crop_x)
-            crop_height = min(crop_request.cropBox.height, resized_height - crop_y)
+            targetX = crop_request.normalizedDeltas.x * resized.width;
+            targetY = crop_request.normalizedDeltas.y * resized.height;
 
+            # Generate the square sizes
+            crop_width = crop_height = crop_request.targetSize;
+            
             print(f"Crop properties:")
-            print(f"  x: {crop_x}")
-            print(f"  y: {crop_y}")
+            print(f"  x: {targetX}")
+            print(f"  y: {targetY}")
             print(f"  width: {crop_width}")
             print(f"  height: {crop_height}")
-            print(f"  resized dimensions: {resized_width}x{resized_height}")
             
             # Perform the crop on the resized image
-            cropped = resized.crop((crop_x, crop_y, crop_x + crop_width, crop_y + crop_height))
+            cropped = resized.crop((targetX, targetY, targetX + crop_width, targetY + crop_height))
             
             # Convert to bytes
             img_byte_arr = io.BytesIO()
             cropped.save(img_byte_arr, format='PNG')
             img_byte_arr.seek(0)
+
+            # Save the cropped image to memory
+            save_path = os.path.join(IMAGES_DIR, f"{image_id}_{crop_request.targetSize}.png")
+            cropped.save(save_path, format='PNG')
             
             return Response(content=img_byte_arr.getvalue(), media_type="image/png")
             
@@ -301,4 +300,4 @@ async def crop_image(image_id: str, crop_request: CropRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="192.168.68.59", port=4322)
+    uvicorn.run(app, host="192.168.68.53", port=4322)
