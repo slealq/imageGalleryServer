@@ -24,6 +24,7 @@ app.add_middleware(
 
 # In-memory storage for captions
 image_captions: Dict[str, str] = {}
+image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
 
 # Models
 class ImageMetadata(BaseModel):
@@ -120,7 +121,7 @@ async def get_images(
                 has_caption=image_id in image_captions,
                 collection_name="Default Collection",  # Dummy data for now
                 has_tags=False,  # Dummy data for now
-                has_crop=False  # Dummy data for now
+                has_crop=image_id in image_crops
             )
             images_metadata.append(metadata)
         
@@ -255,6 +256,29 @@ async def get_image_preview(image_id: str, target_size: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/images/{image_id}/crop")
+async def get_crop(image_id: str):
+    """
+    Get crop information for an image
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Get crop info
+        crop_info = image_crops.get(image_id)
+        if not crop_info:
+            raise HTTPException(status_code=404, detail="No crop found for this image")
+        
+        return crop_info
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/images/{image_id}/crop")
 async def crop_image(image_id: str, crop_request: CropRequest):
     """
@@ -271,6 +295,14 @@ async def crop_image(image_id: str, crop_request: CropRequest):
             
             targetX = crop_request.normalizedDeltas.x * resized.width;
             targetY = crop_request.normalizedDeltas.y * resized.height;
+
+            # Calculate slack (extra space) in both dimensions
+            horizontal_slack = resized.width - crop_request.targetSize
+            vertical_slack = resized.height - crop_request.targetSize
+            
+            # Add half of the slack to center the crop
+            targetX += horizontal_slack / 2
+            targetY += vertical_slack / 2
 
             # Generate the square sizes
             crop_width = crop_height = crop_request.targetSize;
@@ -292,6 +324,15 @@ async def crop_image(image_id: str, crop_request: CropRequest):
             # Save the cropped image to memory
             save_path = os.path.join(IMAGES_DIR, f"{image_id}_{crop_request.targetSize}.png")
             cropped.save(save_path, format='PNG')
+            
+            # Store crop information
+            image_crops[image_id] = {
+                "targetSize": crop_request.targetSize,
+                "normalizedDeltas": {
+                    "x": crop_request.normalizedDeltas.x,
+                    "y": crop_request.normalizedDeltas.y
+                }
+            }
             
             return Response(content=img_byte_arr.getvalue(), media_type="image/png")
             
