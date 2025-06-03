@@ -25,9 +25,28 @@ app.add_middleware(
 IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
 IMAGES_PER_PAGE = 10
 
-# In-memory storage for captions
+# In-memory storage for captions and crops
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
+
+def initialize_caption_cache():
+    """
+    Scan the images directory for existing caption files and populate the cache.
+    Caption files follow the pattern: {imageId}_caption.txt
+    """
+    for file in IMAGES_DIR.glob("*_caption.txt"):
+        try:
+            # Extract imageId from filename
+            # Example: "abc123_caption.txt" -> imageId="abc123"
+            image_id = file.stem.replace('_caption', '')
+            
+            # Read caption from file
+            with open(file, 'r') as f:
+                caption = f.read().strip()
+                image_captions[image_id] = caption
+        except Exception as e:
+            print(f"Error processing caption file {file}: {e}")
+            continue
 
 def initialize_crop_cache():
     """
@@ -68,7 +87,8 @@ def initialize_crop_cache():
             print(f"Error processing cropped image {file}: {e}")
             continue
 
-# Initialize crop cache on startup
+# Initialize caches on startup
+initialize_caption_cache()
 initialize_crop_cache()
 
 # Models
@@ -210,7 +230,12 @@ async def save_caption(image_id: str, caption_request: CaptionRequest):
         if not image_files:
             raise HTTPException(status_code=404, detail="Image not found")
         
-        # Save caption
+        # Save caption to file
+        caption_path = os.path.join(IMAGES_DIR, f"{image_id}_caption.txt")
+        with open(caption_path, 'w') as f:
+            f.write(caption_request.caption)
+        
+        # Update in-memory cache
         image_captions[image_id] = caption_request.caption
         return {"message": "Caption saved successfully"}
     
