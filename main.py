@@ -22,9 +22,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
+IMAGES_PER_PAGE = 10
+
 # In-memory storage for captions
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
+
+def initialize_crop_cache():
+    """
+    Scan the images directory for existing cropped images and populate the cache.
+    Cropped images follow the pattern: {imageId}_crop_{targetSize}.png
+    Metadata is stored in {imageId}_crop_{targetSize}.json
+    """
+    for file in IMAGES_DIR.glob("*_crop_*.png"):
+        try:
+            # Extract imageId and targetSize from filename
+            # Example: "abc123_crop_512.png" -> imageId="abc123", targetSize=512
+            parts = file.stem.split('_crop_')
+            if len(parts) != 2:
+                continue
+                
+            image_id = parts[0]
+            target_size = int(parts[1])
+            
+            # Try to load metadata from JSON file
+            metadata_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{target_size}.json")
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                    image_crops[image_id] = {
+                        "targetSize": metadata["targetSize"],
+                        "normalizedDeltas": metadata["normalizedDeltas"]
+                    }
+            else:
+                # If no metadata file exists, use default values
+                image_crops[image_id] = {
+                    "targetSize": target_size,
+                    "normalizedDeltas": {
+                        "x": 0,
+                        "y": 0
+                    }
+                }
+        except (ValueError, IndexError, json.JSONDecodeError) as e:
+            print(f"Error processing cropped image {file}: {e}")
+            continue
+
+# Initialize crop cache on startup
+initialize_crop_cache()
 
 # Models
 class ImageMetadata(BaseModel):
@@ -64,8 +109,7 @@ class CropRequest(BaseModel):
 
 # Configuration
 # IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
-IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
-IMAGES_PER_PAGE = 10
+
 
 # Ensure images directory exists
 IMAGES_DIR.mkdir(exist_ok=True)
@@ -91,8 +135,8 @@ async def get_images(
     Get paginated list of images with their metadata
     """
     try:
-        # Get all image files
-        image_files = [f for f in IMAGES_DIR.glob("*") if f.is_file()]
+        # Get all image files, excluding cropped images
+        image_files = [f for f in IMAGES_DIR.glob("*") if f.is_file() and "_crop_" not in f.name]
         image_files.sort()
         total_images = len(image_files)
         
@@ -221,7 +265,7 @@ async def generate_caption(image_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-def get_cropped_image(image: PILImage, target_size: int):
+def generate_cropped_image(image: PILImage, target_size: int):
     # Calculate scaling factor to fit within target size
     width, height = image.size
     scale = max(target_size / width, target_size / height)
@@ -244,7 +288,7 @@ async def get_image_preview(image_id: str, target_size: int):
             raise HTTPException(status_code=404, detail="Image not found")
 
         with PILImage.open(image_path) as img:
-            resized = get_cropped_image(img, target_size)
+            resized = generate_cropped_image(img, target_size)
             
             # Convert to bytes
             img_byte_arr = io.BytesIO()
@@ -259,7 +303,7 @@ async def get_image_preview(image_id: str, target_size: int):
 @app.get("/images/{image_id}/crop")
 async def get_crop(image_id: str):
     """
-    Get crop information for an image
+    Get crop information and cropped image for an image
     """
     try:
         # Verify image exists
@@ -272,7 +316,39 @@ async def get_crop(image_id: str):
         if not crop_info:
             raise HTTPException(status_code=404, detail="No crop found for this image")
         
-        return crop_info
+        # Get the cropped image
+        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_{crop_info['targetSize']}.png")
+        if not os.path.exists(cropped_image_path):
+            raise HTTPException(status_code=404, detail="Cropped image file not found")
+        
+        # Return both crop info and the cropped image
+        return {
+            "cropInfo": crop_info,
+            "imageUrl": f"/images/{image_id}/cropped"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/images/{image_id}/cropped")
+async def get_cropped_image(image_id: str):
+    """
+    Get the cropped image file
+    """
+    try:
+        # Get crop info to determine the file path
+        crop_info = image_crops.get(image_id)
+        if not crop_info:
+            raise HTTPException(status_code=404, detail="No crop found for this image")
+        
+        # Get the cropped image path with _crop_ in the filename
+        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
+        if not os.path.exists(cropped_image_path):
+            raise HTTPException(status_code=404, detail="Cropped image file not found")
+        
+        return FileResponse(cropped_image_path)
     
     except HTTPException:
         raise
@@ -291,7 +367,7 @@ async def crop_image(image_id: str, crop_request: CropRequest):
 
         with PILImage.open(image_path) as img:
             # First resize the image to fit within target size
-            resized = get_cropped_image(img, crop_request.targetSize)
+            resized = generate_cropped_image(img, crop_request.targetSize)
             
             targetX = crop_request.normalizedDeltas.x * resized.width;
             targetY = crop_request.normalizedDeltas.y * resized.height;
@@ -321,12 +397,12 @@ async def crop_image(image_id: str, crop_request: CropRequest):
             cropped.save(img_byte_arr, format='PNG')
             img_byte_arr.seek(0)
 
-            # Save the cropped image to memory
-            save_path = os.path.join(IMAGES_DIR, f"{image_id}_{crop_request.targetSize}.png")
+            # Save the cropped image with _crop_ in the filename
+            save_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_request.targetSize}.png")
             cropped.save(save_path, format='PNG')
             
-            # Store crop information
-            image_crops[image_id] = {
+            # Create crop metadata
+            crop_metadata = {
                 "targetSize": crop_request.targetSize,
                 "normalizedDeltas": {
                     "x": crop_request.normalizedDeltas.x,
@@ -334,9 +410,18 @@ async def crop_image(image_id: str, crop_request: CropRequest):
                 }
             }
             
+            # Save metadata to JSON file
+            metadata_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_request.targetSize}.json")
+            with open(metadata_path, 'w') as f:
+                json.dump(crop_metadata, f, indent=2)
+            
+            # Store crop information in memory
+            image_crops[image_id] = crop_metadata
+            
             return Response(content=img_byte_arr.getvalue(), media_type="image/png")
             
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
