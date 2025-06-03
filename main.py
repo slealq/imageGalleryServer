@@ -487,7 +487,8 @@ async def export_images(request: ExportRequest):
                     if os.path.exists(crop_path):
                         print(f"  Adding cropped image to zip")
                         with open(crop_path, 'rb') as f:
-                            zip_file.writestr(f"{base_name}_crop_{crop_info['targetSize']}.png", f.read())
+                            # Use the same base name for both crop and caption
+                            zip_file.writestr(f"{base_name}.png", f.read())
                     else:
                         print(f"  Warning: Crop file not found at {crop_path}")
                 else:
@@ -500,7 +501,8 @@ async def export_images(request: ExportRequest):
                 if os.path.exists(caption_path):
                     print(f"  Adding caption to zip")
                     with open(caption_path, 'r') as f:
-                        zip_file.writestr(f"{base_name}_caption.txt", f.read())
+                        # Use the same base name for both crop and caption
+                        zip_file.writestr(f"{base_name}.txt", f.read())
                 else:
                     print(f"  No caption file found for {image_id}")
         
