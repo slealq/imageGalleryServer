@@ -6,10 +6,11 @@ import os
 from datetime import datetime
 import json
 from pathlib import Path
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from PIL import Image as PILImage
 import asyncio
 import io
+import zipfile
 
 app = FastAPI(title="Image Service API")
 
@@ -126,6 +127,9 @@ class CropRequest(BaseModel):
     imageId: str
     targetSize: int
     normalizedDeltas: NormalizedDeltas
+
+class ExportRequest(BaseModel):
+    imageIds: List[str]
 
 # Configuration
 # IMAGES_DIR = Path("/Users/stuartleal/Library/Mobile Documents/com~apple~CloudDocs/Downloads/4800watermarked")
@@ -450,6 +454,76 @@ async def crop_image(image_id: str, crop_request: CropRequest):
             
     except Exception as e:
         print(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/export-images")
+async def export_images(request: ExportRequest):
+    try:
+        print(f"Starting export for {len(request.imageIds)} images: {request.imageIds}")
+        
+        # Create a BytesIO object to store the zip file
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for image_id in request.imageIds:
+                print(f"\nProcessing image: {image_id}")
+                
+                # Get image filename without extension
+                image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+                if not image_files:
+                    print(f"  Warning: No image file found for {image_id}")
+                    continue
+                
+                image_path = image_files[0]
+                base_name = image_path.stem
+                print(f"  Base name: {base_name}")
+                
+                # Add cropped image if it exists
+                if image_id in image_crops:
+                    crop_info = image_crops[image_id]
+                    crop_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
+                    print(f"  Checking for crop at: {crop_path}")
+                    
+                    if os.path.exists(crop_path):
+                        print(f"  Adding cropped image to zip")
+                        with open(crop_path, 'rb') as f:
+                            zip_file.writestr(f"{base_name}_crop_{crop_info['targetSize']}.png", f.read())
+                    else:
+                        print(f"  Warning: Crop file not found at {crop_path}")
+                else:
+                    print(f"  No crop info found for {image_id}")
+                
+                # Add caption if it exists
+                caption_path = os.path.join(IMAGES_DIR, f"{image_id}_caption.txt")
+                print(f"  Checking for caption at: {caption_path}")
+                
+                if os.path.exists(caption_path):
+                    print(f"  Adding caption to zip")
+                    with open(caption_path, 'r') as f:
+                        zip_file.writestr(f"{base_name}_caption.txt", f.read())
+                else:
+                    print(f"  No caption file found for {image_id}")
+        
+        # Reset buffer position
+        zip_buffer.seek(0)
+        
+        # Get the size of the zip file
+        zip_size = zip_buffer.getbuffer().nbytes
+        print(f"\nZip file created. Size: {zip_size} bytes")
+        
+        if zip_size == 0:
+            print("Warning: Created zip file is empty!")
+        
+        # Return the zip file
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=exported_images.zip"
+            }
+        )
+    except Exception as e:
+        print(f"Error in export_images: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
