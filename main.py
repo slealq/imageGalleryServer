@@ -309,16 +309,19 @@ async def get_crop(image_id: str):
         # Verify image exists
         image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
         if not image_files:
+            print("It's the first")
             raise HTTPException(status_code=404, detail="Image not found")
         
         # Get crop info
         crop_info = image_crops.get(image_id)
         if not crop_info:
+            print("It's the second")
             raise HTTPException(status_code=404, detail="No crop found for this image")
         
         # Get the cropped image
-        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_{crop_info['targetSize']}.png")
+        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
         if not os.path.exists(cropped_image_path):
+            print("It's the third")
             raise HTTPException(status_code=404, detail="Cropped image file not found")
         
         # Return both crop info and the cropped image
