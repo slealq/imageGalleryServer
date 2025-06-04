@@ -266,7 +266,7 @@ class ImageResponse(BaseModel):
     total_pages: int
 
 class CaptionRequest(BaseModel):
-    caption: str
+    prompt: Optional[str] = None
 
 class CaptionResponse(BaseModel):
     caption: str
@@ -458,7 +458,10 @@ async def get_caption(image_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/images/{image_id}/generate-caption")
-async def generate_caption(image_id: str, prompt: str = None):
+async def generate_caption(image_id: str, request: CaptionRequest):
+    """
+    Generate a caption for an image using the caption generator
+    """
     try:
         # Get the image path from the image ID
         image_path = get_image_path(image_id)
@@ -469,7 +472,7 @@ async def generate_caption(image_id: str, prompt: str = None):
         image = PILImage.open(image_path)
         
         # Generate caption using the caption generator
-        caption = await caption_generator.generate_caption(image, prompt)
+        caption = await caption_generator.generate_caption(image, request.prompt)
         
         return {"caption": caption}
     except Exception as e:
