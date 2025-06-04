@@ -131,7 +131,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
                 def __init__(self, tokenizer):
                     super().__init__(tokenizer)
                     self.current_text = ""
-                    self.text_chunks = []
+                    self.previous_text = ""  # Track previous text to detect changes
                     print("CaptionStreamer initialized")
                 
                 def put(self, value):
@@ -150,10 +150,23 @@ class UnslothCaptionGenerator(CaptionGenerator):
                         print(f"Decoded token text: '{token_text}'")
                         
                         if token_text:
-                            self.current_text = token_text  # Replace instead of append since we get full text
-                            self.text_chunks.append(self.current_text)
-                            print(f"Current text: '{self.current_text}'")
-                            print(f"Number of chunks so far: {len(self.text_chunks)}")
+                            # Find the new text by comparing with previous
+                            if token_text.startswith(self.previous_text):
+                                new_text = token_text[len(self.previous_text):]
+                                if new_text:  # Only yield if there's new text
+                                    self.current_text = token_text
+                                    print(f"Previous text: '{self.previous_text}'")
+                                    print(f"New text: '{new_text}'")
+                                    print(f"Current full text: '{self.current_text}'")
+                                    # Yield the new text immediately
+                                    yield new_text
+                            else:
+                                # If text doesn't start with previous, it might be a new generation
+                                print("Text doesn't continue from previous, might be new generation")
+                                self.current_text = token_text
+                                yield token_text
+                            
+                            self.previous_text = token_text
                         else:
                             print("Empty token text, skipping")
                     else:
@@ -177,14 +190,10 @@ class UnslothCaptionGenerator(CaptionGenerator):
             )
             print("Model generation completed")
             
-            print(f"\nTotal chunks generated: {len(streamer.text_chunks)}")
-            print("First few chunks:")
-            for i, chunk in enumerate(streamer.text_chunks[:5]):
-                print(f"Chunk {i}: '{chunk}'")
-            
-            # Yield each chunk of text as it's generated
-            for chunk in streamer.text_chunks:
-                yield chunk
+            # The streamer will yield chunks as they are generated
+            async for chunk in streamer:
+                if chunk:  # Only yield non-empty chunks
+                    yield chunk
 
         except Exception as e:
             print(f"Error during Unsloth caption streaming: {e}")
