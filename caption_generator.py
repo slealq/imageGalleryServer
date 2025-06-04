@@ -177,7 +177,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
                     
                     return token_text
 
-                async def __aiter__(self):
+                def __aiter__(self):
                     return self
 
                 async def __anext__(self):
