@@ -388,7 +388,9 @@ async def get_images(
     page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
     actor: Optional[str] = Query(None, description="Filter by actor name"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
-    year: Optional[str] = Query(None, description="Filter by year")
+    year: Optional[str] = Query(None, description="Filter by year"),
+    has_caption: Optional[bool] = Query(None, description="Filter for images with captions"),
+    has_crop: Optional[bool] = Query(None, description="Filter for images with crops")
 ):
     """
     Get a paginated list of images with optional filtering.
@@ -398,7 +400,7 @@ async def get_images(
     
     # Apply filters if provided
     filtered_images = cached_image_files
-    if actor or tag or year:
+    if actor or tag or year or has_caption is not None or has_crop is not None:
         print(f"\nApplying filters:")
         # Strip quotes from actor name if present
         if actor:
@@ -406,6 +408,8 @@ async def get_images(
         print(f"Actor filter: {actor}")
         print(f"Tag filter: {tag}")
         print(f"Year filter: {year}")
+        print(f"Has caption filter: {has_caption}")
+        print(f"Has crop filter: {has_crop}")
         print(f"Available actors in cache: {list(PHOTOSET_METADATA_CACHE['actors'].keys())}")
         
         filtered_images = []
@@ -454,6 +458,24 @@ async def get_images(
                     include = False
                 else:
                     print(f"Image {base_name} found in scenes for year {year}")
+            
+            # Check caption filter
+            if has_caption is not None and include:
+                has_caption_value = image_id in image_captions
+                if has_caption != has_caption_value:
+                    print(f"Image {image_id} caption status ({has_caption_value}) doesn't match filter ({has_caption})")
+                    include = False
+                else:
+                    print(f"Image {image_id} caption status matches filter")
+            
+            # Check crop filter
+            if has_crop is not None and include:
+                has_crop_value = image_id in image_crops
+                if has_crop != has_crop_value:
+                    print(f"Image {image_id} crop status ({has_crop_value}) doesn't match filter ({has_crop})")
+                    include = False
+                else:
+                    print(f"Image {image_id} crop status matches filter")
                 
             if include:
                 print(f"Including image {image_id} in filtered results")
