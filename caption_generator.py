@@ -132,6 +132,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
                     self.current_text = ""
                     self.previous_text = ""
                     self._queue = asyncio.Queue()
+                    self.assistant_started = False
                 
                 def put(self, value):
                     if isinstance(value, torch.Tensor):
@@ -140,18 +141,33 @@ class UnslothCaptionGenerator(CaptionGenerator):
                         token_text = self.tokenizer.decode(token_ids, skip_special_tokens=True)
                         
                         if token_text:
-                            # Find the new text by comparing with previous
-                            if token_text.startswith(self.previous_text):
-                                new_text = token_text[len(self.previous_text):]
-                                if new_text:  # Only queue if there's new text
-                                    self.current_text = token_text
-                                    # Put directly in the queue without create_task
-                                    self._queue.put_nowait(new_text)
-                            else:
-                                self.current_text = token_text
-                                self._queue.put_nowait(token_text)
+                            # Check if we've found the assistant's response
+                            if not self.assistant_started and "assistant" in token_text.lower():
+                                self.assistant_started = True
+                                # Find where the assistant's response starts
+                                assistant_idx = token_text.lower().find("assistant")
+                                # Find the next newline or end of string
+                                content_start = token_text.find("\n", assistant_idx)
+                                if content_start == -1:
+                                    content_start = assistant_idx + len("assistant")
+                                else:
+                                    content_start += 1  # Skip the newline
+                                # Only keep the text after assistant
+                                token_text = token_text[content_start:].strip()
                             
-                            self.previous_text = token_text
+                            if self.assistant_started:
+                                # Find the new text by comparing with previous
+                                if token_text.startswith(self.previous_text):
+                                    new_text = token_text[len(self.previous_text):]
+                                    if new_text:  # Only queue if there's new text
+                                        self.current_text = token_text
+                                        # Put directly in the queue without create_task
+                                        self._queue.put_nowait(new_text)
+                                else:
+                                    self.current_text = token_text
+                                    self._queue.put_nowait(token_text)
+                                
+                                self.previous_text = token_text
                     
                     return token_text
 
