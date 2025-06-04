@@ -478,6 +478,31 @@ async def generate_caption(image_id: str, request: CaptionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/stream-caption/{image_id}")
+async def stream_caption(image_id: str, request: CaptionRequest):
+    """
+    Stream the caption generation process for an image
+    """
+    try:
+        # Get the image path from the image ID
+        image_path = get_image_path(image_id)
+        if not image_path:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        # Load the image
+        image = PILImage.open(image_path)
+        
+        async def generate():
+            async for chunk in caption_generator.stream_caption(image, request.prompt):
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 def generate_cropped_image(image: PILImage, target_size: int):
     # Calculate scaling factor to fit within target size
     width, height = image.size

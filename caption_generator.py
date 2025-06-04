@@ -104,6 +104,61 @@ class UnslothCaptionGenerator(CaptionGenerator):
             print(f"Error during Unsloth caption generation: {e}") # Consider using a proper logger
             raise Exception(f"Error generating caption with Unsloth: {str(e)}")
 
+    async def stream_caption(self, image: Image.Image, prompt: str = None):
+        """Stream the caption generation process."""
+        try:
+            # Prepare the messages for the vision model, including the image
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt if prompt else "Describe the image."}
+                ]}
+            ]
+
+            # Apply chat template to get the input text string for the tokenizer
+            input_text = self.tokenizer.apply_chat_template(messages, add_generation_prompt = True, tokenize=False)
+            
+            # Tokenize the image and text inputs
+            inputs = self.tokenizer(
+                image,
+                input_text,
+                add_special_tokens = False,
+                return_tensors = "pt",
+            ).to(self.model.device)
+            
+            # Create a custom streamer that yields tokens
+            class CaptionStreamer(TextStreamer):
+                def __init__(self, tokenizer):
+                    super().__init__(tokenizer)
+                    self.current_text = ""
+                    self.text_chunks = []
+                
+                def put(self, value):
+                    super().put(value)
+                    # self.current_text = self.tokenizer.decode(self.tokenizer.convert_ids_to_tokens(value))
+                    self.text_chunks.append(value)
+                    return value
+
+            streamer = CaptionStreamer(self.tokenizer)
+            
+            # Generate with streaming
+            generated_ids = self.model.generate(
+                **inputs,
+                streamer = streamer,
+                max_new_tokens = 128,
+                use_cache = True,
+                temperature = 1.5,
+                min_p = 0.1,
+            )
+            
+            # Yield each chunk of text as it's generated
+            for chunk in streamer.text_chunks:
+                yield chunk
+
+        except Exception as e:
+            print(f"Error during Unsloth caption streaming: {e}")
+            raise Exception(f"Error streaming caption with Unsloth: {str(e)}")
+
 def get_caption_generator() -> CaptionGenerator:
     """Factory function to get the appropriate caption generator based on configuration."""
     if CAPTION_GENERATOR == CaptionGeneratorType.UNSLOTH:
