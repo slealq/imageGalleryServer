@@ -8,13 +8,11 @@ import json
 from pathlib import Path
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from PIL import Image as PILImage
-import asyncio
 import io
 import zipfile
-import base64
 from io import BytesIO
 import time # Import time module
-from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT, PROFILING_ENABLED, PROFILING_DIR # Import profiling config
+from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT, PROFILING_ENABLED, PROFILING_DIR, PHOTOSET_METADATA_DIRECTORY # Import profiling config
 from caption_generator import get_caption_generator
 import uvicorn
 
@@ -40,8 +38,83 @@ image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": i
 image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
 cached_image_files: List[Path] = [] # Cache for the list of image file paths
 
+# Initialize photoset metadata cache
+PHOTOSET_METADATA_CACHE = {
+    'actors': {},  # actor_name -> set of scene_ids
+    'tags': {},    # tag_name -> set of scene_ids
+    'year': {},    # year -> set of scene_ids
+    'scenes': set(),  # set of all scene_ids
+    'scene_metadata': {}  # scene_id -> {actors: [], tags: [], year: str}
+}
+
 # Initialize caption generator
 caption_generator = get_caption_generator()
+
+def read_photoset_metadata():
+    global PHOTOSET_METADATA_CACHE
+    print(f"Reading photoset metadata from directory: {PHOTOSET_METADATA_DIRECTORY}")
+    
+    # Read all JSON files in the metadata directory
+    json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
+    print(f"Found {len(json_files)} JSON files in metadata directory")
+    
+    for filename in json_files:
+        filename_base = os.path.splitext(filename)[0]
+        print(f"\nProcessing metadata file: {filename}")
+        print(f"Base name: {filename_base}")
+
+        file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+                print(f"Loaded JSON data: {data}")
+                
+                # Initialize scene metadata
+                scene_metadata = {
+                    'actors': [],
+                    'tags': [],
+                    'year': None
+                }
+                
+                # Process actors
+                for each_actor in data['actors']:
+                    scene_set = PHOTOSET_METADATA_CACHE['actors'].get(each_actor, set())
+                    scene_set.add(filename_base)
+                    PHOTOSET_METADATA_CACHE['actors'][each_actor] = scene_set
+                    scene_metadata['actors'].append(each_actor)
+                    print(f"Added actor {each_actor} for scene {filename_base}")
+
+                # Process tags
+                for each_tag in data['tags']:
+                    scene_set = PHOTOSET_METADATA_CACHE['tags'].get(each_tag, set())
+                    scene_set.add(filename_base)
+                    PHOTOSET_METADATA_CACHE['tags'][each_tag] = scene_set
+                    scene_metadata['tags'].append(each_tag)
+                    print(f"Added tag {each_tag} for scene {filename_base}")
+
+                # Process year
+                year = data['date'].split(', ')[1]
+                scene_set = PHOTOSET_METADATA_CACHE['year'].get(year, set())
+                scene_set.add(filename_base)
+                PHOTOSET_METADATA_CACHE['year'][year] = scene_set
+                scene_metadata['year'] = year
+                print(f"Added year {year} for scene {filename_base}")
+
+                # Add scene to scenes set and store its metadata
+                PHOTOSET_METADATA_CACHE['scenes'].add(filename_base)
+                PHOTOSET_METADATA_CACHE['scene_metadata'][filename_base] = scene_metadata
+                print(f"Added scene {filename_base} to scenes set with metadata")
+                                        
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error reading {filename}: {str(e)}")
+            continue
+    
+    print("\nFinal cache state:")
+    print(f"Number of actors: {len(PHOTOSET_METADATA_CACHE['actors'])}")
+    print(f"Number of tags: {len(PHOTOSET_METADATA_CACHE['tags'])}")
+    print(f"Number of years: {len(PHOTOSET_METADATA_CACHE['year'])}")
+    print(f"Number of scenes: {len(PHOTOSET_METADATA_CACHE['scenes'])}")
+    print(f"Number of scene metadata entries: {len(PHOTOSET_METADATA_CACHE['scene_metadata'])}")
 
 def load_cache(cache_file: Path) -> dict:
     """Loads cache from a JSON file."""
@@ -213,6 +286,10 @@ async def load_all_caches():
     # Ensure profiling directory exists if profiling is enabled
     if PROFILING_ENABLED:
         PROFILING_DIR.mkdir(exist_ok=True)
+    
+    # Initialize photoset metadata cache
+    read_photoset_metadata()
+    print(f"Photoset metadata cache initialized with {len(PHOTOSET_METADATA_CACHE['scenes'])} scenes")
         
     initialize_caption_cache()
     initialize_crop_cache()
@@ -257,6 +334,9 @@ class ImageMetadata(BaseModel):
     collection_name: str = "Default Collection"
     has_tags: bool = False
     has_crop: bool = False
+    year: Optional[str] = None
+    tags: List[str] = []
+    actors: List[str] = []
 
 class ImageResponse(BaseModel):
     images: List[ImageMetadata]
@@ -291,105 +371,167 @@ class ExportRequest(BaseModel):
 # Ensure images directory exists
 IMAGES_DIR.mkdir(exist_ok=True)
 
+@app.get("/filters", response_model=Dict[str, List[str]])
+async def get_available_filters():
+    """
+    Get all available filters (actors, tags, years) that can be used to filter images.
+    """
+    return {
+        "actors": sorted(PHOTOSET_METADATA_CACHE['actors'].keys()),
+        "tags": sorted(PHOTOSET_METADATA_CACHE['tags'].keys()),
+        "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
+    }
+
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page")
+    page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
+    actor: Optional[str] = Query(None, description="Filter by actor name"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    year: Optional[str] = Query(None, description="Filter by year")
 ):
     """
-    Get paginated list of images with their metadata
+    Get a paginated list of images with optional filtering.
     """
-    start_time = time.time() # Start profiling timer
+    # Start timing if profiling is enabled
+    step_start_time = time.time() if PROFILING_ENABLED else None
     
-    if PROFILING_ENABLED:
-        print(f"--- Profiling /images endpoint (page={page}, page_size={page_size}) ---")
-    
-    try:
-        # Use the cached image file list instead of globbing every time
-        step_start_time = time.time() if PROFILING_ENABLED else None
+    # Apply filters if provided
+    filtered_images = cached_image_files
+    if actor or tag or year:
+        print(f"\nApplying filters:")
+        # Strip quotes from actor name if present
+        if actor:
+            actor = actor.strip('"\'')
+        print(f"Actor filter: {actor}")
+        print(f"Tag filter: {tag}")
+        print(f"Year filter: {year}")
+        print(f"Available actors in cache: {list(PHOTOSET_METADATA_CACHE['actors'].keys())}")
         
-        # The image_files list is now the pre-built cached_image_files
-        # We still need total_images for pagination
-        total_images = len(cached_image_files)
-        
-        if PROFILING_ENABLED and step_start_time is not None:
-            print(f"Step 1: Get total image count from cached list: {time.time() - step_start_time:.4f} seconds")
-
-        # Calculate pagination
-        step_start_time = time.time() if PROFILING_ENABLED else None
-        
-        total_pages = (total_images + page_size - 1) // page_size
-        start_idx = (page - 1) * page_size
-        end_idx = min(start_idx + page_size, total_images)
-        
-        if PROFILING_ENABLED and step_start_time is not None:
-            print(f"Step 2: Calculate pagination indices: {time.time() - step_start_time:.4f} seconds")
-
-        # Get images for current page from the cached list
-        step_start_time = time.time() if PROFILING_ENABLED else None
-        
-        page_images = cached_image_files[start_idx:end_idx]
-        
-        if PROFILING_ENABLED and step_start_time is not None:
-            print(f"Step 3: Slice images for current page from cached list: {time.time() - step_start_time:.4f} seconds")
-
-        # Create metadata for each image
-        step_start_time = time.time() if PROFILING_ENABLED else None
-        
-        images_metadata = []
-        for img_file in page_images:
-            stat = img_file.stat()
+        filtered_images = []
+        for img_file in cached_image_files:
             image_id = str(img_file.stem)
-            # Get dimensions directly from the cache
-            width, height = image_dimensions.get(image_id, (None, None)) # Use .get for safety, though it should be in cache after startup
+            # Extract base name by removing the additional numbers at the end
+            # The format is typically: Name_Name__Date_Resolution_Number_Number
+            # We want to keep everything up to the resolution number
+            base_name = '_'.join(image_id.split('_')[:-2])  # Remove last two number segments
+            include = True
             
-            # Ensure the file still exists before creating metadata (optional but safer if files can be deleted while server is running)
-            # if not img_file.exists():
-            #     print(f"Warning: Image file {img_file} not found while creating metadata. Skipping.")
-            #     continue
+            print(f"\nProcessing image: {image_id}")
+            print(f"Base name: {base_name}")
 
-            metadata = ImageMetadata(
-                id=image_id,
-                filename=img_file.name,
-                size=stat.st_size,
-                created_at=datetime.fromtimestamp(stat.st_ctime),
-                mime_type=f"image/{img_file.suffix[1:].lower()}" if img_file.suffix else "application/octet-stream",
-                width=width,
-                height=height,
-                has_caption=image_id in image_captions,
-                collection_name="Default Collection",  # Dummy data for now
-                has_tags=False,  # Dummy data for now
-                has_crop=image_id in image_crops
-            )
-            images_metadata.append(metadata)
-        
-        if PROFILING_ENABLED and step_start_time is not None:
-             print(f"Step 4: Create metadata for {len(images_metadata)} images: {time.time() - step_start_time:.4f} seconds")
+            print(f"Available actors in cache: {list(PHOTOSET_METADATA_CACHE['actors'].keys())}")
 
-        # Return response
-        step_start_time = time.time() if PROFILING_ENABLED else None
-        
-        response = ImageResponse(
-            images=images_metadata,
-            total=total_images,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages
-        )
-        
-        if PROFILING_ENABLED and step_start_time is not None:
-             print(f"Step 5: Prepare ImageResponse object: {time.time() - step_start_time:.4f} seconds")
+            if actor in PHOTOSET_METADATA_CACHE['actors']:
+                print(f"Actor {actor} found in cache")
+            else:
+                print(f"Actor {actor} not found in cache")
 
-        return response
+            actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
+            print(f"Scenes for actor '{actor}': {actor_scenes}")
+            
+            if actor:
+                if base_name not in actor_scenes:
+                    print(f"Image {base_name} not found in scenes for actor {actor}")
+                    include = False
+                else:
+                    print(f"Image {base_name} found in scenes for actor {actor}")
+            
+            if tag and include:
+                tag_scenes = PHOTOSET_METADATA_CACHE['tags'].get(tag, set())
+                print(f"Scenes for tag '{tag}': {tag_scenes}")
+                if base_name not in tag_scenes:
+                    print(f"Image {base_name} not found in scenes for tag {tag}")
+                    include = False
+                else:
+                    print(f"Image {base_name} found in scenes for tag {tag}")
+            
+            if year and include:
+                year_scenes = PHOTOSET_METADATA_CACHE['year'].get(year, set())
+                print(f"Scenes for year '{year}': {year_scenes}")
+                if base_name not in year_scenes:
+                    print(f"Image {base_name} not found in scenes for year {year}")
+                    include = False
+                else:
+                    print(f"Image {base_name} found in scenes for year {year}")
+                
+            if include:
+                print(f"Including image {image_id} in filtered results")
+                filtered_images.append(img_file)
+            else:
+                print(f"Excluding image {image_id} from filtered results")
+        
+        print(f"\nFiltering complete. Found {len(filtered_images)} matching images")
     
-    except Exception as e:
-        if PROFILING_ENABLED:
-            print(f"Error during /images profiling: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Calculate pagination
+    total_images = len(filtered_images)
+    total_pages = (total_images + page_size - 1) // page_size
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, total_images)
+    
+    if PROFILING_ENABLED and step_start_time is not None:
+        print(f"Step 1: Apply filters and calculate pagination: {time.time() - step_start_time:.4f} seconds")
+    
+    # Get images for current page
+    step_start_time = time.time() if PROFILING_ENABLED else None
+    page_images = filtered_images[start_idx:end_idx]
+    
+    if PROFILING_ENABLED and step_start_time is not None:
+        print(f"Step 2: Get images for current page: {time.time() - step_start_time:.4f} seconds")
+    
+    # Create metadata for each image
+    step_start_time = time.time() if PROFILING_ENABLED else None
+
+    images_metadata = []
+    for img_file in page_images:
+        stat = img_file.stat()
+        image_id = str(img_file.stem)
+        # Extract base name by removing the additional numbers at the end
+        # The format is typically: Name_Name__Date_Resolution_Number_Number
+        # We want to keep everything up to the resolution number
+        base_name = '_'.join(image_id.split('_')[:-2])  # Remove last two number segments
+        width, height = image_dimensions.get(image_id, (None, None))
         
-    finally:
-        if PROFILING_ENABLED:
-            print(f"--- Total /images request duration: {time.time() - start_time:.4f} seconds ---\n") # Added newline for clarity
+        # Get metadata from scene_metadata index
+        scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
+            'actors': [],
+            'tags': [],
+            'year': None
+        })
+        
+        print(f"Processing image_id: {image_id}")
+        print(f"Processing base_name: {base_name}")
+        print(f"Scene metadata keys: {list(PHOTOSET_METADATA_CACHE['scene_metadata'].keys())}")
+        print(f"Scene metadata: {scene_metadata}")
+        
+        metadata = ImageMetadata(
+            id=image_id,
+            filename=img_file.name,
+            size=stat.st_size,
+            created_at=datetime.fromtimestamp(stat.st_ctime),
+            mime_type=f"image/{img_file.suffix[1:].lower()}" if img_file.suffix else "application/octet-stream",
+            width=width,
+            height=height,
+            has_caption=image_id in image_captions,
+            collection_name="Default Collection",
+            has_tags=len(scene_metadata['tags']) > 0,
+            has_crop=image_id in image_crops,
+            year=scene_metadata['year'],
+            tags=scene_metadata['tags'],
+            actors=scene_metadata['actors']
+        )
+        images_metadata.append(metadata)
+    
+    if PROFILING_ENABLED and step_start_time is not None:
+        print(f"Step 3: Create metadata for {len(images_metadata)} images: {time.time() - step_start_time:.4f} seconds")
+    
+    return ImageResponse(
+        images=images_metadata,
+        total=total_images,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages
+    )
 
 @app.get("/images/{image_id}")
 async def get_image(image_id: str):
