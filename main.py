@@ -13,8 +13,8 @@ import io
 import zipfile
 import base64
 from io import BytesIO
-from unsloth import FastLanguageModel
-import torch
+from config import IMAGES_DIR, IMAGES_PER_PAGE
+from caption_generator import get_caption_generator
 
 app = FastAPI(title="Image Service API")
 
@@ -27,20 +27,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
-IMAGES_PER_PAGE = 10
-
 # In-memory storage for captions and crops
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
 
-# Initialize the Unsloth model
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Llama-3.2-11B-Vision-Instruct",
-    max_seq_length=2048,
-    dtype=torch.float16,
-    load_in_4bit=True,
-)
+# Initialize caption generator
+caption_generator = get_caption_generator()
 
 def initialize_caption_cache():
     """
@@ -289,7 +281,7 @@ async def get_caption(image_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/generate-caption")
+@app.post("/images/{image_id}/generate-caption")
 async def generate_caption(image_id: str, prompt: str = None):
     try:
         # Get the image path from the image ID
@@ -297,56 +289,16 @@ async def generate_caption(image_id: str, prompt: str = None):
         if not image_path:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        # Generate caption using the image path and optional prompt
-        caption = await generate_caption_for_image(image_path, prompt)
+        # Load the image
+        image = PILImage.open(image_path)
+        
+        # Generate caption using the caption generator
+        caption = await caption_generator.generate_caption(image, prompt)
         
         return {"caption": caption}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-async def generate_caption_for_image(image_path: str, prompt: str = None) -> str:
-    try:
-        # Load the image
-        image = PILImage.open(image_path)
-        
-        # Prepare the prompt
-        if prompt:
-            user_prompt = f"Please generate a caption for this image, focusing on: {prompt}"
-        else:
-            user_prompt = "Please generate a detailed caption for this image."
-        
-        # Generate caption using Unsloth
-        inputs = tokenizer(
-            user_prompt,
-            images=image,
-            return_tensors="pt"
-        )
-        
-        # Move inputs to the same device as the model
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        
-        # Generate caption
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=300,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-            )
-        
-        # Decode the generated text
-        caption = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Clean up the caption (remove the prompt and any extra whitespace)
-        caption = caption.replace(user_prompt, "").strip()
-        
-        return caption
-        
-    except Exception as e:
-        print(f"Error generating caption: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
 def generate_cropped_image(image: PILImage, target_size: int):
     # Calculate scaling factor to fit within target size
     width, height = image.size

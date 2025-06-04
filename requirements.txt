@@ -1,8 +1,12 @@
+# Core dependencies
 fastapi==0.109.2
 uvicorn==0.27.1
 python-multipart==0.0.9
 Pillow==10.2.0
-unsloth==2025.5.9
-torch
-transformers
-accelerate 
+
+# Optional dependencies for AI caption generation
+# Uncomment these lines if you want to use Unsloth for caption generation
+# unsloth==2025.5.9
+# torch
+# transformers
+# accelerate 
