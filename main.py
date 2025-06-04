@@ -11,6 +11,10 @@ from PIL import Image as PILImage
 import asyncio
 import io
 import zipfile
+import base64
+from io import BytesIO
+from unsloth import FastLanguageModel
+import torch
 
 app = FastAPI(title="Image Service API")
 
@@ -29,6 +33,14 @@ IMAGES_PER_PAGE = 10
 # In-memory storage for captions and crops
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
+
+# Initialize the Unsloth model
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/Llama-3.2-11B-Vision-Instruct",
+    max_seq_length=2048,
+    dtype=torch.float16,
+    load_in_4bit=True,
+)
 
 def initialize_caption_cache():
     """
@@ -159,8 +171,14 @@ async def get_images(
     Get paginated list of images with their metadata
     """
     try:
-        # Get all image files, excluding cropped images
-        image_files = [f for f in IMAGES_DIR.glob("*") if f.is_file() and "_crop_" not in f.name]
+        # Get all image files, excluding cropped images and non-image files
+        image_files = [
+            f for f in IMAGES_DIR.glob("*") 
+            if f.is_file() 
+            and f.suffix.lower() in ['.jpg', '.jpeg', '.png']  # Only include image files
+            and "_crop_" not in f.name  # Exclude cropped images
+            and not f.name.startswith('.')  # Exclude hidden files like .DS_Store
+        ]
         image_files.sort()
         total_images = len(image_files)
         
@@ -271,27 +289,62 @@ async def get_caption(image_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/images/{image_id}/generate-caption", response_model=CaptionResponse)
-async def generate_caption(image_id: str):
-    """
-    Generate a caption for an image (dummy implementation)
-    """
+@app.post("/api/generate-caption")
+async def generate_caption(image_id: str, prompt: str = None):
     try:
-        # Verify image exists
-        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-        if not image_files:
+        # Get the image path from the image ID
+        image_path = get_image_path(image_id)
+        if not image_path:
             raise HTTPException(status_code=404, detail="Image not found")
+
+        # Generate caption using the image path and optional prompt
+        caption = await generate_caption_for_image(image_path, prompt)
         
-        # Simulate processing time
-        await asyncio.sleep(5)
-        
-        # Generate dummy caption
-        dummy_caption = f"This is a generated caption for image {image_id}"
-        return CaptionResponse(caption=dummy_caption)
-    
-    except HTTPException:
-        raise
+        return {"caption": caption}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def generate_caption_for_image(image_path: str, prompt: str = None) -> str:
+    try:
+        # Load the image
+        image = PILImage.open(image_path)
+        
+        # Prepare the prompt
+        if prompt:
+            user_prompt = f"Please generate a caption for this image, focusing on: {prompt}"
+        else:
+            user_prompt = "Please generate a detailed caption for this image."
+        
+        # Generate caption using Unsloth
+        inputs = tokenizer(
+            user_prompt,
+            images=image,
+            return_tensors="pt"
+        )
+        
+        # Move inputs to the same device as the model
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        # Generate caption
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=300,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+            )
+        
+        # Decode the generated text
+        caption = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Clean up the caption (remove the prompt and any extra whitespace)
+        caption = caption.replace(user_prompt, "").strip()
+        
+        return caption
+        
+    except Exception as e:
+        print(f"Error generating caption: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
 def generate_cropped_image(image: PILImage, target_size: int):

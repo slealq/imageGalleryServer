@@ -1,5 +1,8 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.6
-pydantic==2.4.2
-Pillow==10.1.0 
+fastapi==0.109.2
+uvicorn==0.27.1
+python-multipart==0.0.9
+Pillow==10.2.0
+unsloth==2025.5.9
+torch
+transformers
+accelerate 
