@@ -13,8 +13,9 @@ import io
 import zipfile
 import base64
 from io import BytesIO
-from config import IMAGES_DIR, IMAGES_PER_PAGE
+from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT
 from caption_generator import get_caption_generator
+import uvicorn
 
 app = FastAPI(title="Image Service API")
 
@@ -534,5 +535,4 @@ async def export_images(request: ExportRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="192.168.68.53", port=4322)
+    uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT)

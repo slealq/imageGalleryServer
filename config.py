@@ -6,13 +6,18 @@ class CaptionGeneratorType(Enum):
     UNSLOTH = "unsloth"
 
 # Configuration settings
-IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
+# IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
+IMAGES_DIR = Path("/mnt/d/TEST/FLAT")
 IMAGES_PER_PAGE = 10
 
+# Server settings
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8001
+
 # Caption generation settings
-CAPTION_GENERATOR = CaptionGeneratorType.DUMMY  # Change to UNSLOTH to use AI generation
+CAPTION_GENERATOR = CaptionGeneratorType.UNSLOTH  # Change to UNSLOTH to use AI generation
 
 # Unsloth model settings (only used if CAPTION_GENERATOR is UNSLOTH)
-UNSLOTH_MODEL_NAME = "unsloth/Llama-3.2-11B-Vision-Instruct"
-UNSLOTH_MAX_SEQ_LENGTH = 2048
+# UNSLOTH_MODEL_NAME = "unsloth/Llama-3.2-11B-Vision-Instruct" # Not used when loading from local path
+# UNSLOTH_MAX_SEQ_LENGTH = 2048 # Not directly used in inference generate
 UNSLOTH_LOAD_IN_4BIT = True 
