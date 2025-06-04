@@ -80,7 +80,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
             generated_ids = self.model.generate(
                 **inputs,
                 streamer = text_streamer,
-                max_new_tokens = 128, # Consider making this configurable
+                max_new_tokens = 2048, # Consider making this configurable
                 use_cache = True,
                 temperature = 1.5, # Consider making this configurable
                 min_p = 0.1,       # Consider making this configurable
