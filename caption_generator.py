@@ -132,24 +132,46 @@ class UnslothCaptionGenerator(CaptionGenerator):
                     super().__init__(tokenizer)
                     self.current_text = ""
                     self.text_chunks = []
+                    print("CaptionStreamer initialized")
                 
                 def put(self, value):
-                    super().put(value)
-                    # self.current_text = self.tokenizer.decode(self.tokenizer.convert_ids_to_tokens(value))
-                    self.text_chunks.append(value)
-                    return value
+                    print(f"\n--- Token Debug ---")
+                    print(f"Raw token value: {value}")
+                    print(f"Token type: {type(value)}")
+                    
+                    # Decode the current token
+                    token_text = self.tokenizer.decode([value], skip_special_tokens=True)
+                    print(f"Decoded token text: '{token_text}'")
+                    
+                    if token_text:
+                        self.current_text += token_text
+                        self.text_chunks.append(self.current_text)
+                        print(f"Current accumulated text: '{self.current_text}'")
+                        print(f"Number of chunks so far: {len(self.text_chunks)}")
+                    else:
+                        print("Empty token text, skipping")
+                    
+                    return token_text
 
+            print("\nCreating streamer and starting generation...")
             streamer = CaptionStreamer(self.tokenizer)
             
             # Generate with streaming
+            print("Starting model generation...")
             generated_ids = self.model.generate(
                 **inputs,
                 streamer = streamer,
-                max_new_tokens = 128,
+                max_new_tokens = 2048,
                 use_cache = True,
                 temperature = 1.5,
                 min_p = 0.1,
             )
+            print("Model generation completed")
+            
+            print(f"\nTotal chunks generated: {len(streamer.text_chunks)}")
+            print("First few chunks:")
+            for i, chunk in enumerate(streamer.text_chunks[:5]):
+                print(f"Chunk {i}: '{chunk}'")
             
             # Yield each chunk of text as it's generated
             for chunk in streamer.text_chunks:

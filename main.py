@@ -493,14 +493,26 @@ async def stream_caption(image_id: str, request: CaptionRequest):
         image = PILImage.open(image_path)
         
         async def generate():
-            async for chunk in caption_generator.stream_caption(image, request.prompt):
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            try:
+                async for chunk in caption_generator.stream_caption(image, request.prompt):
+                    if chunk:  # Only send non-empty chunks
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            except Exception as e:
+                # Send error as SSE
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                raise
         
         return StreamingResponse(
             generate(),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable proxy buffering
+            }
         )
     except Exception as e:
+        print(f"Error in stream_caption endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def generate_cropped_image(image: PILImage, target_size: int):
