@@ -13,7 +13,8 @@ import io
 import zipfile
 import base64
 from io import BytesIO
-from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT
+import time # Import time module
+from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT, PROFILING_ENABLED, PROFILING_DIR # Import profiling config
 from caption_generator import get_caption_generator
 import uvicorn
 
@@ -37,6 +38,7 @@ CROPS_CACHE_FILE = IMAGES_DIR / "crops_cache.json"
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
 image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
+cached_image_files: List[Path] = [] # Cache for the list of image file paths
 
 # Initialize caption generator
 caption_generator = get_caption_generator()
@@ -205,12 +207,31 @@ def get_image_path(image_id: str) -> Optional[Path]:
 
 @app.on_event("startup")
 async def load_all_caches():
-    """Loads all caches from files on startup."""
+    """Loads all caches from files and builds the cached image file list on startup."""
     print("Loading caches on startup...")
+    
+    # Ensure profiling directory exists if profiling is enabled
+    if PROFILING_ENABLED:
+        PROFILING_DIR.mkdir(exist_ok=True)
+        
     initialize_caption_cache()
     initialize_crop_cache()
     initialize_dimension_cache()
-    print("Caches loaded.")
+    
+    # Build cached image file list on startup
+    print("Building cached image file list...")
+    global cached_image_files
+    cached_image_files = [
+        f for f in IMAGES_DIR.glob("*") 
+        if f.is_file() 
+        and f.suffix.lower() in ['.jpg', '.jpeg', '.png']  # Only include image files
+        and "_crop_" not in f.name  # Exclude cropped images
+        and not f.name.startswith('.')  # Exclude hidden files like .DS_Store
+    ]
+    cached_image_files.sort()
+    print(f"Cached image file list built with {len(cached_image_files)} files.")
+    
+    print("Caches loaded and image list built.")
 
 @app.on_event("shutdown")
 async def save_all_caches():
@@ -277,28 +298,43 @@ async def get_images(
     """
     Get paginated list of images with their metadata
     """
+    start_time = time.time() # Start profiling timer
+    
+    if PROFILING_ENABLED:
+        print(f"--- Profiling /images endpoint (page={page}, page_size={page_size}) ---")
+    
     try:
-        # Get all image files, excluding cropped images and non-image files
-        # This list is now primarily used for pagination and getting filenames, not for reading dimensions here
-        image_files = [
-            f for f in IMAGES_DIR.glob("*") 
-            if f.is_file() 
-            and f.suffix.lower() in ['.jpg', '.jpeg', '.png']  # Only include image files
-            and "_crop_" not in f.name  # Exclude cropped images
-            and not f.name.startswith('.')  # Exclude hidden files like .DS_Store
-        ]
-        image_files.sort()
-        total_images = len(image_files)
+        # Use the cached image file list instead of globbing every time
+        step_start_time = time.time() if PROFILING_ENABLED else None
         
+        # The image_files list is now the pre-built cached_image_files
+        # We still need total_images for pagination
+        total_images = len(cached_image_files)
+        
+        if PROFILING_ENABLED and step_start_time is not None:
+            print(f"Step 1: Get total image count from cached list: {time.time() - step_start_time:.4f} seconds")
+
         # Calculate pagination
+        step_start_time = time.time() if PROFILING_ENABLED else None
+        
         total_pages = (total_images + page_size - 1) // page_size
         start_idx = (page - 1) * page_size
         end_idx = min(start_idx + page_size, total_images)
         
-        # Get images for current page
-        page_images = image_files[start_idx:end_idx]
+        if PROFILING_ENABLED and step_start_time is not None:
+            print(f"Step 2: Calculate pagination indices: {time.time() - step_start_time:.4f} seconds")
+
+        # Get images for current page from the cached list
+        step_start_time = time.time() if PROFILING_ENABLED else None
         
+        page_images = cached_image_files[start_idx:end_idx]
+        
+        if PROFILING_ENABLED and step_start_time is not None:
+            print(f"Step 3: Slice images for current page from cached list: {time.time() - step_start_time:.4f} seconds")
+
         # Create metadata for each image
+        step_start_time = time.time() if PROFILING_ENABLED else None
+        
         images_metadata = []
         for img_file in page_images:
             stat = img_file.stat()
@@ -306,6 +342,11 @@ async def get_images(
             # Get dimensions directly from the cache
             width, height = image_dimensions.get(image_id, (None, None)) # Use .get for safety, though it should be in cache after startup
             
+            # Ensure the file still exists before creating metadata (optional but safer if files can be deleted while server is running)
+            # if not img_file.exists():
+            #     print(f"Warning: Image file {img_file} not found while creating metadata. Skipping.")
+            #     continue
+
             metadata = ImageMetadata(
                 id=image_id,
                 filename=img_file.name,
@@ -321,16 +362,33 @@ async def get_images(
             )
             images_metadata.append(metadata)
         
-        return ImageResponse(
+        if PROFILING_ENABLED and step_start_time is not None:
+             print(f"Step 4: Create metadata for {len(images_metadata)} images: {time.time() - step_start_time:.4f} seconds")
+
+        # Return response
+        step_start_time = time.time() if PROFILING_ENABLED else None
+        
+        response = ImageResponse(
             images=images_metadata,
             total=total_images,
             page=page,
             page_size=page_size,
             total_pages=total_pages
         )
+        
+        if PROFILING_ENABLED and step_start_time is not None:
+             print(f"Step 5: Prepare ImageResponse object: {time.time() - step_start_time:.4f} seconds")
+
+        return response
     
     except Exception as e:
+        if PROFILING_ENABLED:
+            print(f"Error during /images profiling: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+        
+    finally:
+        if PROFILING_ENABLED:
+            print(f"--- Total /images request duration: {time.time() - start_time:.4f} seconds ---\n") # Added newline for clarity
 
 @app.get("/images/{image_id}")
 async def get_image(image_id: str):

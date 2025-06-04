@@ -14,6 +14,10 @@ IMAGES_PER_PAGE = 10
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8001
 
+# Feature Flags
+PROFILING_ENABLED = True # Set to True to enable profiling on the /images endpoint
+PROFILING_DIR = IMAGES_DIR / "profiling_results" # Directory to save profiling results
+
 # Caption generation settings
 CAPTION_GENERATOR = CaptionGeneratorType.UNSLOTH  # Change to UNSLOTH to use AI generation
 
