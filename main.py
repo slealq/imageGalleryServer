@@ -382,6 +382,25 @@ async def get_available_filters():
         "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
     }
 
+def find_base_name(image_id: str) -> str:
+    """
+    Find the base name for an image by matching against scene metadata keys.
+    
+    The scene metadata keys contain the original base names for images. This function
+    looks for a scene metadata key that is contained within the image ID.
+    
+    Args:
+        image_id (str): The full image ID to find the base name for
+        
+    Returns:
+        str: The matching base name from scene metadata, or None if no match is found
+    """
+    scene_keys = PHOTOSET_METADATA_CACHE['scene_metadata'].keys()
+    for scene_key in scene_keys:
+        if scene_key in image_id:
+            return scene_key
+    return None
+
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
     page: int = Query(1, ge=1, description="Page number"),
@@ -395,144 +414,78 @@ async def get_images(
     """
     Get a paginated list of images with optional filtering.
     """
-    # Start timing if profiling is enabled
-    step_start_time = time.time() if PROFILING_ENABLED else None
-    
-    # Apply filters if provided
     filtered_images = cached_image_files
     if actor or tag or year or has_caption is not None or has_crop is not None:
-        print(f"\nApplying filters:")
-        # Strip quotes from actor name if present
         if actor:
             actor = actor.strip('"\'')
-        print(f"Actor filter: {actor}")
-        print(f"Tag filter: {tag}")
-        print(f"Year filter: {year}")
-        print(f"Has caption filter: {has_caption}")
-        print(f"Has crop filter: {has_crop}")
-        print(f"Available actors in cache: {list(PHOTOSET_METADATA_CACHE['actors'].keys())}")
         
         filtered_images = []
         for img_file in cached_image_files:
             image_id = str(img_file.stem)
-            # Extract base name by removing the additional numbers and any other segments at the end
-            # The format is typically: Name_Name__Date_Resolution[_AdditionalSegments]_Number_Number
-            # We want to keep everything up to and including the resolution number
-            parts = image_id.split('_')
-            # Find the index of the resolution number (it's typically a 4-digit number)
-            resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
-            if resolution_idx != -1:
-                base_name = '_'.join(parts[:resolution_idx + 1])
-            else:
-                # Fallback to removing last two segments if we can't find resolution
-                base_name = '_'.join(parts[:-2])
+            base_name = find_base_name(image_id)
+            if base_name is None:
+                parts = image_id.split('_')
+                resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
+                if resolution_idx != -1:
+                    base_name = '_'.join(parts[:resolution_idx + 1])
+                else:
+                    base_name = '_'.join(parts[:-2])
             
             include = True
             
-            print(f"\nProcessing image: {image_id}")
-            print(f"Base name: {base_name}")
-
-            print(f"Available actors in cache: {list(PHOTOSET_METADATA_CACHE['actors'].keys())}")
-
-            if actor in PHOTOSET_METADATA_CACHE['actors']:
-                print(f"Actor {actor} found in cache")
-            else:
-                print(f"Actor {actor} not found in cache")
-
-            actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
-            print(f"Scenes for actor '{actor}': {actor_scenes}")
-            
             if actor:
+                actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
                 if base_name not in actor_scenes:
-                    print(f"Image {base_name} not found in scenes for actor {actor}")
                     include = False
-                else:
-                    print(f"Image {base_name} found in scenes for actor {actor}")
             
             if tag and include:
                 tag_scenes = PHOTOSET_METADATA_CACHE['tags'].get(tag, set())
-                print(f"Scenes for tag '{tag}': {tag_scenes}")
                 if base_name not in tag_scenes:
-                    print(f"Image {base_name} not found in scenes for tag {tag}")
                     include = False
-                else:
-                    print(f"Image {base_name} found in scenes for tag {tag}")
             
             if year and include:
                 year_scenes = PHOTOSET_METADATA_CACHE['year'].get(year, set())
-                print(f"Scenes for year '{year}': {year_scenes}")
                 if base_name not in year_scenes:
-                    print(f"Image {base_name} not found in scenes for year {year}")
                     include = False
-                else:
-                    print(f"Image {base_name} found in scenes for year {year}")
             
-            # Check caption filter
             if has_caption is not None and include:
                 has_caption_value = image_id in image_captions
                 if has_caption != has_caption_value:
-                    print(f"Image {image_id} caption status ({has_caption_value}) doesn't match filter ({has_caption})")
                     include = False
-                else:
-                    print(f"Image {image_id} caption status matches filter")
             
-            # Check crop filter
             if has_crop is not None and include:
                 has_crop_value = image_id in image_crops
                 if has_crop != has_crop_value:
-                    print(f"Image {image_id} crop status ({has_crop_value}) doesn't match filter ({has_crop})")
                     include = False
-                else:
-                    print(f"Image {image_id} crop status matches filter")
                 
             if include:
-                print(f"Including image {image_id} in filtered results")
                 filtered_images.append(img_file)
-            else:
-                print(f"Excluding image {image_id} from filtered results")
-        
-        print(f"\nFiltering complete. Found {len(filtered_images)} matching images")
     
-    # Calculate pagination
     total_images = len(filtered_images)
     total_pages = (total_images + page_size - 1) // page_size
     start_idx = (page - 1) * page_size
     end_idx = min(start_idx + page_size, total_images)
-    
-    if PROFILING_ENABLED and step_start_time is not None:
-        print(f"Step 1: Apply filters and calculate pagination: {time.time() - step_start_time:.4f} seconds")
-    
-    # Get images for current page
-    step_start_time = time.time() if PROFILING_ENABLED else None
     page_images = filtered_images[start_idx:end_idx]
     
-    if PROFILING_ENABLED and step_start_time is not None:
-        print(f"Step 2: Get images for current page: {time.time() - step_start_time:.4f} seconds")
-    
-    # Create metadata for each image
-    step_start_time = time.time() if PROFILING_ENABLED else None
-
     images_metadata = []
     for img_file in page_images:
         stat = img_file.stat()
         image_id = str(img_file.stem)
-        # Extract base name by removing the additional numbers at the end
-        # The format is typically: Name_Name__Date_Resolution_Number_Number
-        # We want to keep everything up to the resolution number
-        base_name = '_'.join(image_id.split('_')[:-2])  # Remove last two number segments
-        width, height = image_dimensions.get(image_id, (None, None))
+        base_name = find_base_name(image_id)
+        if base_name is None:
+            parts = image_id.split('_')
+            resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
+            if resolution_idx != -1:
+                base_name = '_'.join(parts[:resolution_idx + 1])
+            else:
+                base_name = '_'.join(parts[:-2])
         
-        # Get metadata from scene_metadata index
+        width, height = image_dimensions.get(image_id, (None, None))
         scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
             'year': None
         })
-        
-        print(f"Processing image_id: {image_id}")
-        print(f"Processing base_name: {base_name}")
-        print(f"Scene metadata keys: {list(PHOTOSET_METADATA_CACHE['scene_metadata'].keys())}")
-        print(f"Scene metadata: {scene_metadata}")
         
         metadata = ImageMetadata(
             id=image_id,
@@ -551,9 +504,6 @@ async def get_images(
             actors=scene_metadata['actors']
         )
         images_metadata.append(metadata)
-    
-    if PROFILING_ENABLED and step_start_time is not None:
-        print(f"Step 3: Create metadata for {len(images_metadata)} images: {time.time() - step_start_time:.4f} seconds")
     
     return ImageResponse(
         images=images_metadata,
