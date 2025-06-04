@@ -108,7 +108,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
     async def stream_caption(self, image: Image.Image, prompt: str = None):
         """Stream the caption generation process."""
         try:
-            # Prepare the messages for the vision model, including the image
+            # Prepare the messages for the vision model
             messages = [
                 {"role": "user", "content": [
                     {"type": "image"},
@@ -116,10 +116,8 @@ class UnslothCaptionGenerator(CaptionGenerator):
                 ]}
             ]
 
-            # Apply chat template to get the input text string for the tokenizer
+            # Apply chat template and tokenize
             input_text = self.tokenizer.apply_chat_template(messages, add_generation_prompt = True, tokenize=False)
-            
-            # Tokenize the image and text inputs
             inputs = self.tokenizer(
                 image,
                 input_text,
@@ -132,24 +130,14 @@ class UnslothCaptionGenerator(CaptionGenerator):
                 def __init__(self, tokenizer):
                     super().__init__(tokenizer)
                     self.current_text = ""
-                    self.previous_text = ""  # Track previous text to detect changes
-                    self._queue = asyncio.Queue()  # Queue for async communication
-                    print("CaptionStreamer initialized")
+                    self.previous_text = ""
+                    self._queue = asyncio.Queue()
                 
                 def put(self, value):
-                    print(f"\n--- Token Debug ---")
-                    print(f"Raw token value: {value}")
-                    print(f"Token type: {type(value)}")
-                    
-                    # Handle tensor input
                     if isinstance(value, torch.Tensor):
-                        # Convert tensor to list of integers
-                        token_ids = value[0].tolist()  # Get first row and convert to list
-                        print(f"Token IDs: {token_ids}")
-                        
-                        # Decode the tokens
+                        # Convert tensor to list of integers and decode
+                        token_ids = value[0].tolist()
                         token_text = self.tokenizer.decode(token_ids, skip_special_tokens=True)
-                        print(f"Decoded token text: '{token_text}'")
                         
                         if token_text:
                             # Find the new text by comparing with previous
@@ -157,23 +145,13 @@ class UnslothCaptionGenerator(CaptionGenerator):
                                 new_text = token_text[len(self.previous_text):]
                                 if new_text:  # Only queue if there's new text
                                     self.current_text = token_text
-                                    print(f"Previous text: '{self.previous_text}'")
-                                    print(f"New text: '{new_text}'")
-                                    print(f"Current full text: '{self.current_text}'")
-                                    # Queue the new text for async consumption
-                                    asyncio.create_task(self._queue.put(new_text))
+                                    # Put directly in the queue without create_task
+                                    self._queue.put_nowait(new_text)
                             else:
-                                # If text doesn't start with previous, it might be a new generation
-                                print("Text doesn't continue from previous, might be new generation")
                                 self.current_text = token_text
-                                asyncio.create_task(self._queue.put(token_text))
+                                self._queue.put_nowait(token_text)
                             
                             self.previous_text = token_text
-                        else:
-                            print("Empty token text, skipping")
-                    else:
-                        print(f"Unexpected token type: {type(value)}")
-                        return ""
                     
                     return token_text
 
@@ -182,45 +160,50 @@ class UnslothCaptionGenerator(CaptionGenerator):
 
                 async def __anext__(self):
                     try:
-                        # Get the next chunk from the queue
-                        chunk = await self._queue.get()
-                        if chunk is None:  # None is our sentinel value for end of stream
+                        # Use get_nowait to avoid blocking
+                        chunk = self._queue.get_nowait()
+                        if chunk is None:  # End of stream
                             raise StopAsyncIteration
                         return chunk
+                    except asyncio.QueueEmpty:
+                        # If queue is empty, wait a bit and try again
+                        await asyncio.sleep(0.01)
+                        return await self.__anext__()
                     except Exception as e:
-                        print(f"Error in async iteration: {e}")
                         raise StopAsyncIteration
 
                 def end(self):
                     """Signal the end of streaming"""
-                    asyncio.create_task(self._queue.put(None))
+                    self._queue.put_nowait(None)
 
-            print("\nCreating streamer and starting generation...")
+            # Create streamer and generate
             streamer = CaptionStreamer(self.tokenizer)
             
-            # Generate with streaming
-            print("Starting model generation...")
-            generated_ids = self.model.generate(
-                **inputs,
-                streamer = streamer,
-                max_new_tokens = 2048,
-                use_cache = True,
-                temperature = 1.5,
-                min_p = 0.1,
+            # Start generation in a separate task
+            generation_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.model.generate,
+                    **inputs,
+                    streamer=streamer,
+                    max_new_tokens=2048,
+                    use_cache=True,
+                    temperature=1.5,
+                    min_p=0.1,
+                )
             )
-            print("Model generation completed")
             
-            # Signal the end of streaming
-            streamer.end()
-            
-            # Stream the chunks as they are generated
-            async for chunk in streamer:
-                if chunk:  # Only yield non-empty chunks
-                    yield chunk
+            # Stream chunks while generation is happening
+            try:
+                async for chunk in streamer:
+                    if chunk:  # Only yield non-empty chunks
+                        yield chunk
+            finally:
+                # Make sure to wait for generation to complete
+                await generation_task
+                streamer.end()
 
         except Exception as e:
-            print(f"Error during Unsloth caption streaming: {e}")
-            raise Exception(f"Error streaming caption with Unsloth: {str(e)}")
+            raise Exception(f"Error streaming caption: {str(e)}")
 
 def get_caption_generator() -> CaptionGenerator:
     """Factory function to get the appropriate caption generator based on configuration."""
