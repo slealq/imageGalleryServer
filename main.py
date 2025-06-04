@@ -28,74 +28,200 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage for captions and crops
+# Define cache file paths
+DIMENSIONS_CACHE_FILE = IMAGES_DIR / "dimensions_cache.json"
+CAPTIONS_CACHE_FILE = IMAGES_DIR / "captions_cache.json"
+CROPS_CACHE_FILE = IMAGES_DIR / "crops_cache.json"
+
+# In-memory storage for captions, crops, and dimensions
 image_captions: Dict[str, str] = {}
 image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
+image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
 
 # Initialize caption generator
 caption_generator = get_caption_generator()
 
+def load_cache(cache_file: Path) -> dict:
+    """Loads cache from a JSON file."""
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON from {cache_file}. Starting with empty cache.")
+            return {}
+        except Exception as e:
+            print(f"Error loading cache from {cache_file}: {e}. Starting with empty cache.")
+            return {}
+    return {}
+
+def save_cache(cache_data: dict, cache_file: Path):
+    """Saves cache to a JSON file."""
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        print(f"Cache saved to {cache_file}")
+    except Exception as e:
+        print(f"Error saving cache to {cache_file}: {e}")
+
+
 def initialize_caption_cache():
     """
-    Scan the images directory for existing caption files and populate the cache.
-    Caption files follow the pattern: {imageId}_caption.txt
+    Load captions from cache file and scan directory for new captions.
     """
-    for file in IMAGES_DIR.glob("*_caption.txt"):
+    print("Initializing caption cache...")
+    global image_captions # Declare intent to modify the global variable
+    image_captions = load_cache(CAPTIONS_CACHE_FILE)
+    
+    # Get current caption files in the directory
+    current_caption_files = {file.stem.replace('_caption', '') for file in IMAGES_DIR.glob("*_caption.txt")} # Use a set for faster lookup
+
+    # Find new caption files not in cache
+    new_caption_ids = current_caption_files - set(image_captions.keys())
+
+    for image_id in new_caption_ids:
         try:
-            # Extract imageId from filename
-            # Example: "abc123_caption.txt" -> imageId="abc123"
-            image_id = file.stem.replace('_caption', '')
-            
-            # Read caption from file
-            with open(file, 'r') as f:
-                caption = f.read().strip()
-                image_captions[image_id] = caption
+            # Read caption from file for new files
+            caption_file = IMAGES_DIR / f"{image_id}_caption.txt"
+            if caption_file.exists():
+                 with open(caption_file, 'r') as f:
+                     caption = f.read().strip()
+                     image_captions[image_id] = caption
         except Exception as e:
-            print(f"Error processing caption file {file}: {e}")
+            print(f"Error processing new caption file {caption_file}: {e}")
             continue
+            
+    print(f"Caption cache initialized with {len(image_captions)} entries.")
 
 def initialize_crop_cache():
     """
-    Scan the images directory for existing cropped images and populate the cache.
-    Cropped images follow the pattern: {imageId}_crop_{targetSize}.png
-    Metadata is stored in {imageId}_crop_{targetSize}.json
+    Load crop info from cache file and scan directory for new crop info.
     """
-    for file in IMAGES_DIR.glob("*_crop_*.png"):
-        try:
-            # Extract imageId and targetSize from filename
-            # Example: "abc123_crop_512.png" -> imageId="abc123", targetSize=512
-            parts = file.stem.split('_crop_')
-            if len(parts) != 2:
-                continue
-                
-            image_id = parts[0]
-            target_size = int(parts[1])
-            
-            # Try to load metadata from JSON file
-            metadata_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{target_size}.json")
-            if os.path.exists(metadata_path):
+    print("Initializing crop cache...")
+    global image_crops # Declare intent to modify the global variable
+    image_crops = load_cache(CROPS_CACHE_FILE)
+    
+    # Get current crop metadata files in the directory
+    current_crop_files = {file.stem.replace('_crop_', '') for file in IMAGES_DIR.glob("*_crop_*.json")} # Use a set for faster lookup
+
+    # Find new crop files not in cache
+    new_crop_ids = current_crop_files - set(image_crops.keys())
+
+    for image_id in new_crop_ids:
+         try:
+            # Try to load metadata from JSON file for new files
+            # Assuming there might be multiple crop sizes per image, we'll just take the first one found for caching purposes
+            # A more robust approach might handle multiple crops per image ID
+            metadata_files = list(IMAGES_DIR.glob(f"{image_id}_crop_*.json"))
+            if metadata_files:
+                metadata_path = metadata_files[0]
                 with open(metadata_path, 'r') as f:
                     metadata = json.load(f)
                     image_crops[image_id] = {
-                        "targetSize": metadata["targetSize"],
-                        "normalizedDeltas": metadata["normalizedDeltas"]
+                        "targetSize": metadata.get("targetSize"), # Use .get() for safety
+                        "normalizedDeltas": metadata.get("normalizedDeltas") # Use .get() for safety
                     }
-            else:
-                # If no metadata file exists, use default values
-                image_crops[image_id] = {
-                    "targetSize": target_size,
-                    "normalizedDeltas": {
-                        "x": 0,
-                        "y": 0
-                    }
-                }
-        except (ValueError, IndexError, json.JSONDecodeError) as e:
-            print(f"Error processing cropped image {file}: {e}")
-            continue
+         except (ValueError, IndexError, json.JSONDecodeError) as e:
+             print(f"Error processing new crop file {metadata_path}: {e}") # Use metadata_path here
+             continue
+             
+    print(f"Crop cache initialized with {len(image_crops)} entries.")
 
-# Initialize caches on startup
-initialize_caption_cache()
-initialize_crop_cache()
+def initialize_dimension_cache():
+    """
+    Load dimensions from cache file and scan directory for new images.
+    """
+    print("Initializing dimension cache...")
+    global image_dimensions # Declare intent to modify the global variable
+    
+    # Load existing cache
+    # Note: JSON keys are strings, so tuple keys (width, height) need handling if you were saving that way.
+    # Our current dimension cache uses imageId as key, which is already a string, so direct load works.
+    loaded_cache = load_cache(DIMENSIONS_CACHE_FILE)
+    # Convert list from JSON back to tuple if necessary (json saves tuples as lists)
+    image_dimensions = {k: tuple(v) for k, v in loaded_cache.items()} if loaded_cache else {}
+    
+    # Get all image files, excluding cropped images and non-image files
+    all_image_files = [
+        f for f in IMAGES_DIR.glob("*") 
+        if f.is_file() 
+        and f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+        and "_crop_" not in f.name  # Exclude cropped images
+        and not f.name.startswith('.')  # Exclude hidden files like .DS_Store
+    ]
+    
+    # Find new image files not in cache
+    current_image_ids = {str(f.stem) for f in all_image_files}
+    cached_image_ids = set(image_dimensions.keys())
+    new_image_ids = current_image_ids - cached_image_ids
+
+    print(f"Found {len(new_image_ids)} new images not in dimension cache.")
+
+    for img_file in all_image_files:
+        image_id = str(img_file.stem)
+        # Only process if it's a new image or its dimension is missing from cache
+        if image_id in new_image_ids or image_id not in image_dimensions:
+             width, height = get_image_dimensions_from_file(img_file)
+             if width is not None and height is not None:
+                 image_dimensions[image_id] = (width, height) # Cache the result
+
+    print(f"Dimension cache initialized/updated with {len(image_dimensions)} entries.")
+
+def get_image_dimensions_from_file(image_path: Path) -> tuple[Optional[int], Optional[int]]:
+    """Helper function to get image dimensions by opening the file."""
+    try:
+        with PILImage.open(image_path) as img:
+            return img.size
+    except Exception:
+        return None, None
+
+def get_image_dimensions(image_id: str) -> tuple[Optional[int], Optional[int]]:
+    """Get image dimensions from cache or file, and cache the result if read from file."""
+    # This function now primarily serves as a getter from the in-memory cache
+    # The caching from file is handled during initialization and when new images are added/processed via other endpoints if necessary.
+    # However, the current logic in initialize_dimension_cache covers the main case.
+    
+    if image_id in image_dimensions:
+        return image_dimensions[image_id]
+    
+    # Fallback: If somehow not in cache (shouldn't happen after proper initialization), read from file and add to cache
+    print(f"Warning: Image dimensions for {image_id} not in cache. Reading from file.")
+    image_path = get_image_path(image_id)
+    if not image_path:
+        return None, None
+    
+    width, height = get_image_dimensions_from_file(image_path)
+    if width is not None and height is not None:
+        image_dimensions[image_id] = (width, height) # Cache the result
+        # Consider saving cache here too if you expect dimensions to be fetched outside of startup for new files
+
+    return width, height
+
+def get_image_path(image_id: str) -> Optional[Path]:
+    """Get the full path of an image file by its ID."""
+    # This function is correct as is
+    image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+    return image_files[0] if image_files else None
+
+@app.on_event("startup")
+async def load_all_caches():
+    """Loads all caches from files on startup."""
+    print("Loading caches on startup...")
+    initialize_caption_cache()
+    initialize_crop_cache()
+    initialize_dimension_cache()
+    print("Caches loaded.")
+
+@app.on_event("shutdown")
+async def save_all_caches():
+    """Saves all caches to files on shutdown."""
+    print("Saving caches on shutdown...")
+    save_cache(image_captions, CAPTIONS_CACHE_FILE)
+    save_cache(image_crops, CROPS_CACHE_FILE)
+    # Convert tuples in dimension cache to lists for JSON serialization
+    dimensions_to_save = {k: list(v) for k, v in image_dimensions.items()}
+    save_cache(dimensions_to_save, DIMENSIONS_CACHE_FILE)
+    print("Caches saved.")
 
 # Models
 class ImageMetadata(BaseModel):
@@ -143,18 +269,6 @@ class ExportRequest(BaseModel):
 # Ensure images directory exists
 IMAGES_DIR.mkdir(exist_ok=True)
 
-def get_image_dimensions(image_path: Path) -> tuple[Optional[int], Optional[int]]:
-    try:
-        with PILImage.open(image_path) as img:
-            return img.size
-    except Exception:
-        return None, None
-
-def get_image_path(image_id: str) -> Optional[Path]:
-    """Get the full path of an image file by its ID."""
-    image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-    return image_files[0] if image_files else None
-
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
     page: int = Query(1, ge=1, description="Page number"),
@@ -165,6 +279,7 @@ async def get_images(
     """
     try:
         # Get all image files, excluding cropped images and non-image files
+        # This list is now primarily used for pagination and getting filenames, not for reading dimensions here
         image_files = [
             f for f in IMAGES_DIR.glob("*") 
             if f.is_file() 
@@ -187,8 +302,10 @@ async def get_images(
         images_metadata = []
         for img_file in page_images:
             stat = img_file.stat()
-            width, height = get_image_dimensions(img_file)
             image_id = str(img_file.stem)
+            # Get dimensions directly from the cache
+            width, height = image_dimensions.get(image_id, (None, None)) # Use .get for safety, though it should be in cache after startup
+            
             metadata = ImageMetadata(
                 id=image_id,
                 filename=img_file.name,
