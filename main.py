@@ -267,6 +267,7 @@ class ImageResponse(BaseModel):
 
 class CaptionRequest(BaseModel):
     prompt: Optional[str] = None
+    caption: Optional[str] = None
 
 class CaptionResponse(BaseModel):
     caption: str
@@ -415,23 +416,50 @@ async def save_caption(image_id: str, caption_request: CaptionRequest):
     Save a caption for an image
     """
     try:
+        print(f"Attempting to save caption for image {image_id}")
+        print(f"Caption request: {caption_request}")
+        
+        if not caption_request.caption:
+            print("No caption provided in request")
+            raise HTTPException(status_code=400, detail="No caption provided")
+        
         # Verify image exists
         image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
         if not image_files:
+            print(f"Image not found: {image_id}")
             raise HTTPException(status_code=404, detail="Image not found")
+        
+        print(f"Found image file: {image_files[0]}")
         
         # Save caption to file
         caption_path = os.path.join(IMAGES_DIR, f"{image_id}_caption.txt")
-        with open(caption_path, 'w') as f:
-            f.write(caption_request.caption)
+        print(f"Saving caption to: {caption_path}")
+        
+        try:
+            with open(caption_path, 'w') as f:
+                f.write(caption_request.caption)
+            print("Caption file written successfully")
+        except Exception as write_error:
+            print(f"Error writing caption file: {str(write_error)}")
+            raise
         
         # Update in-memory cache
-        image_captions[image_id] = caption_request.caption
+        try:
+            image_captions[image_id] = caption_request.caption
+            print("In-memory cache updated successfully")
+        except Exception as cache_error:
+            print(f"Error updating in-memory cache: {str(cache_error)}")
+            raise
+        
         return {"message": "Caption saved successfully"}
     
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Unexpected error in save_caption: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/images/{image_id}/caption", response_model=CaptionResponse)
