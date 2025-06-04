@@ -415,10 +415,18 @@ async def get_images(
         filtered_images = []
         for img_file in cached_image_files:
             image_id = str(img_file.stem)
-            # Extract base name by removing the additional numbers at the end
-            # The format is typically: Name_Name__Date_Resolution_Number_Number
-            # We want to keep everything up to the resolution number
-            base_name = '_'.join(image_id.split('_')[:-2])  # Remove last two number segments
+            # Extract base name by removing the additional numbers and any other segments at the end
+            # The format is typically: Name_Name__Date_Resolution[_AdditionalSegments]_Number_Number
+            # We want to keep everything up to and including the resolution number
+            parts = image_id.split('_')
+            # Find the index of the resolution number (it's typically a 4-digit number)
+            resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
+            if resolution_idx != -1:
+                base_name = '_'.join(parts[:resolution_idx + 1])
+            else:
+                # Fallback to removing last two segments if we can't find resolution
+                base_name = '_'.join(parts[:-2])
+            
             include = True
             
             print(f"\nProcessing image: {image_id}")
