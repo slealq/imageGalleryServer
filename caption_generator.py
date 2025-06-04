@@ -12,6 +12,7 @@ from PIL import Image
 import torch
 from pathlib import Path
 from transformers import TextStreamer
+import asyncio
 
 
 class CaptionGenerator(ABC):
@@ -132,6 +133,7 @@ class UnslothCaptionGenerator(CaptionGenerator):
                     super().__init__(tokenizer)
                     self.current_text = ""
                     self.previous_text = ""  # Track previous text to detect changes
+                    self._queue = asyncio.Queue()  # Queue for async communication
                     print("CaptionStreamer initialized")
                 
                 def put(self, value):
@@ -153,18 +155,18 @@ class UnslothCaptionGenerator(CaptionGenerator):
                             # Find the new text by comparing with previous
                             if token_text.startswith(self.previous_text):
                                 new_text = token_text[len(self.previous_text):]
-                                if new_text:  # Only yield if there's new text
+                                if new_text:  # Only queue if there's new text
                                     self.current_text = token_text
                                     print(f"Previous text: '{self.previous_text}'")
                                     print(f"New text: '{new_text}'")
                                     print(f"Current full text: '{self.current_text}'")
-                                    # Yield the new text immediately
-                                    yield new_text
+                                    # Queue the new text for async consumption
+                                    asyncio.create_task(self._queue.put(new_text))
                             else:
                                 # If text doesn't start with previous, it might be a new generation
                                 print("Text doesn't continue from previous, might be new generation")
                                 self.current_text = token_text
-                                yield token_text
+                                asyncio.create_task(self._queue.put(token_text))
                             
                             self.previous_text = token_text
                         else:
@@ -174,6 +176,24 @@ class UnslothCaptionGenerator(CaptionGenerator):
                         return ""
                     
                     return token_text
+
+                async def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    try:
+                        # Get the next chunk from the queue
+                        chunk = await self._queue.get()
+                        if chunk is None:  # None is our sentinel value for end of stream
+                            raise StopAsyncIteration
+                        return chunk
+                    except Exception as e:
+                        print(f"Error in async iteration: {e}")
+                        raise StopAsyncIteration
+
+                def end(self):
+                    """Signal the end of streaming"""
+                    asyncio.create_task(self._queue.put(None))
 
             print("\nCreating streamer and starting generation...")
             streamer = CaptionStreamer(self.tokenizer)
@@ -190,7 +210,10 @@ class UnslothCaptionGenerator(CaptionGenerator):
             )
             print("Model generation completed")
             
-            # The streamer will yield chunks as they are generated
+            # Signal the end of streaming
+            streamer.end()
+            
+            # Stream the chunks as they are generated
             async for chunk in streamer:
                 if chunk:  # Only yield non-empty chunks
                     yield chunk
