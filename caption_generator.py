@@ -139,17 +139,26 @@ class UnslothCaptionGenerator(CaptionGenerator):
                     print(f"Raw token value: {value}")
                     print(f"Token type: {type(value)}")
                     
-                    # Decode the current token
-                    token_text = self.tokenizer.decode([value], skip_special_tokens=True)
-                    print(f"Decoded token text: '{token_text}'")
-                    
-                    if token_text:
-                        self.current_text += token_text
-                        self.text_chunks.append(self.current_text)
-                        print(f"Current accumulated text: '{self.current_text}'")
-                        print(f"Number of chunks so far: {len(self.text_chunks)}")
+                    # Handle tensor input
+                    if isinstance(value, torch.Tensor):
+                        # Convert tensor to list of integers
+                        token_ids = value[0].tolist()  # Get first row and convert to list
+                        print(f"Token IDs: {token_ids}")
+                        
+                        # Decode the tokens
+                        token_text = self.tokenizer.decode(token_ids, skip_special_tokens=True)
+                        print(f"Decoded token text: '{token_text}'")
+                        
+                        if token_text:
+                            self.current_text = token_text  # Replace instead of append since we get full text
+                            self.text_chunks.append(self.current_text)
+                            print(f"Current text: '{self.current_text}'")
+                            print(f"Number of chunks so far: {len(self.text_chunks)}")
+                        else:
+                            print("Empty token text, skipping")
                     else:
-                        print("Empty token text, skipping")
+                        print(f"Unexpected token type: {type(value)}")
+                        return ""
                     
                     return token_text
 
