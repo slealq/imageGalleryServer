@@ -1,28 +1,37 @@
-from enum import Enum
+import os
 from pathlib import Path
 
-class CaptionGeneratorType(Enum):
-    DUMMY = "dummy"
-    UNSLOTH = "unsloth"
+# Server configuration
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8001"))
 
-# Configuration settings
-# IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
-IMAGES_DIR = Path("/mnt/d/TEST/FLAT")
-PHOTOSET_METADATA_DIRECTORY = Path("/mnt/d/TEST")
-IMAGES_PER_PAGE = 10
+# Directory configuration
+BASE_DIR = Path(__file__).parent.parent
+IMAGES_DIR = Path(os.getenv("IMAGES_DIR", BASE_DIR / "images"))
+CAPTIONS_DIR = Path(os.getenv("CAPTIONS_DIR", BASE_DIR / "captions"))
+CROPS_DIR = Path(os.getenv("CROPS_DIR", BASE_DIR / "crops"))
+EXPORT_DIR = Path(os.getenv("EXPORT_DIR", BASE_DIR / "exports"))
+PHOTOSET_METADATA_DIRECTORY = Path(os.getenv("PHOTOSET_METADATA_DIRECTORY", BASE_DIR / "metadata"))
 
-# Server settings
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8001
+# Cache configuration
+CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "10 * 1024 * 1024 * 1024"))  # 10GB default
+CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour default
 
-# Feature Flags
-PROFILING_ENABLED = True # Set to True to enable profiling on the /images endpoint
-PROFILING_DIR = IMAGES_DIR / "profiling_results" # Directory to save profiling results
+# Image configuration
+IMAGES_PER_PAGE = int(os.getenv("IMAGES_PER_PAGE", "20"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "10 * 1024 * 1024"))  # 10MB default
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif"}
 
-# Caption generation settings
-CAPTION_GENERATOR = CaptionGeneratorType.UNSLOTH  # Change to UNSLOTH to use AI generation
+# Performance configuration
+SLOW_REQUEST_THRESHOLD = float(os.getenv("SLOW_REQUEST_THRESHOLD", "1.0"))  # 1 second
+SLOW_IMAGE_PROCESSING_THRESHOLD = float(os.getenv("SLOW_IMAGE_PROCESSING_THRESHOLD", "0.5"))  # 500ms
+SLOW_BATCH_PROCESSING_THRESHOLD = float(os.getenv("SLOW_BATCH_PROCESSING_THRESHOLD", "2.0"))  # 2 seconds
 
-# Unsloth model settings (only used if CAPTION_GENERATOR is UNSLOTH)
-# UNSLOTH_MODEL_NAME = "unsloth/Llama-3.2-11B-Vision-Instruct" # Not used when loading from local path
-# UNSLOTH_MAX_SEQ_LENGTH = 2048 # Not directly used in inference generate
-UNSLOTH_LOAD_IN_4BIT = True 
+# Logging configuration
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FORMAT = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+LOG_FILE = os.getenv("LOG_FILE", BASE_DIR / "logs" / "image_server.log")
+
+# Create necessary directories
+for directory in [IMAGES_DIR, CAPTIONS_DIR, CROPS_DIR, EXPORT_DIR, PHOTOSET_METADATA_DIRECTORY, BASE_DIR / "logs"]:
+    directory.mkdir(parents=True, exist_ok=True) 
