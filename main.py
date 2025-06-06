@@ -19,8 +19,45 @@ import threading
 from collections import OrderedDict
 import sys
 import asyncio
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
+from starlette.datastructures import Headers
+from starlette.requests import Request as StarletteRequest
+from starlette.websockets import WebSocket
+from starlette.types import Scope, Receive, Send
+
+class RequestTimingMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app: ASGIApp):
+        super().__init__(app)
+    
+    async def dispatch(self, request: Request, call_next):
+        # Generate request ID
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        
+        # Start timing
+        start_time = time.time()
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Calculate timing
+        process_time = time.time() - start_time
+        
+        # Add timing and request ID to response headers
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Process-Time"] = f"{process_time:.3f}"
+        
+        # Log timing
+        print(f"Request {request_id}: {request.method} {request.url.path} completed in {process_time:.3f}s")
+        
+        return response
 
 app = FastAPI(title="Image Service API")
+
+# Add request timing middleware
+app.add_middleware(RequestTimingMiddleware)
 
 # Enable CORS
 app.add_middleware(
@@ -306,11 +343,26 @@ def get_image_path(image_id: str) -> Optional[Path]:
     image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
     return image_files[0] if image_files else None
 
+class MockRequest:
+    """A mock request object for background tasks"""
+    def __init__(self):
+        self.state = type('State', (), {'request_id': str(uuid.uuid4())})()
+        self.method = "BACKGROUND"
+        self.url = type('URL', (), {'path': "/background/warmup"})()
+        self.headers = Headers({})
+
 async def warm_up_cache(page: int = 1, page_size: int = IMAGES_PER_PAGE):
     """Warm up the cache with images from a specific page"""
     try:
+        # Create a mock request for background task
+        mock_request = MockRequest()
+        
         # Get images for the page
-        response = await get_images(page=page, page_size=page_size)
+        response = await get_images(
+            request=mock_request,
+            page=page,
+            page_size=page_size
+        )
         
         # Process each image in the page
         for image_metadata in response.images:
@@ -344,6 +396,47 @@ async def warm_up_next_pages(current_page: int, num_pages: int = 10):
     """Warm up cache for next N pages"""
     for page in range(current_page + 1, current_page + num_pages + 1):
         await warm_up_cache(page)
+
+async def predict_and_warm_cache(current_page: int, page_size: int = IMAGES_PER_PAGE):
+    """
+    Predict and warm up cache for likely upcoming requests based on current page.
+    This includes:
+    1. Current page images (if not already cached)
+    2. Next 3 pages (typical batch request size)
+    3. Preview sizes for current page images
+    """
+    try:
+        # Create a mock request for background task
+        mock_request = MockRequest()
+        
+        # Get current page images
+        response = await get_images(
+            request=mock_request,
+            page=current_page,
+            page_size=page_size
+        )
+        
+        # Warm up current page images
+        current_page_tasks = []
+        for image_metadata in response.images:
+            image_id = image_metadata.id
+            if image_id not in image_cache.cache:
+                current_page_tasks.append(warm_up_cache(current_page))
+        
+        # Start warming up current page images
+        if current_page_tasks:
+            asyncio.create_task(asyncio.gather(*current_page_tasks))
+        
+        # Warm up next 3 pages (typical batch size)
+        next_pages_task = asyncio.create_task(warm_up_next_pages(current_page, num_pages=3))
+        
+        # Wait for current page to complete before starting next pages
+        if current_page_tasks:
+            await asyncio.gather(*current_page_tasks)
+        await next_pages_task
+        
+    except Exception as e:
+        print(f"Error in predict_and_warm_cache: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -454,8 +547,167 @@ async def get_available_filters():
         "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
     }
 
+def apply_image_filters(
+    images: List[Path],
+    actor: Optional[str] = None,
+    tag: Optional[str] = None,
+    year: Optional[str] = None,
+    has_caption: Optional[bool] = None,
+    has_crop: Optional[bool] = None
+) -> List[Path]:
+    """
+    Apply filters to a list of images based on the provided criteria.
+    
+    Args:
+        images: List of image paths to filter
+        actor: Filter by actor name
+        tag: Filter by tag
+        year: Filter by year
+        has_caption: Filter for images with captions
+        has_crop: Filter for images with crops
+        
+    Returns:
+        List of filtered image paths
+    """
+    if not any([actor, tag, year, has_caption is not None, has_crop is not None]):
+        return images
+        
+    filtered_images = []
+    for img_file in images:
+        image_id = str(img_file.stem)
+        base_name = '_'.join(image_id.split('_')[:-2])
+        include = True
+        
+        if actor:
+            actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
+            if base_name not in actor_scenes:
+                include = False
+        
+        if tag and include:
+            tag_scenes = PHOTOSET_METADATA_CACHE['tags'].get(tag, set())
+            if base_name not in tag_scenes:
+                include = False
+        
+        if year and include:
+            year_scenes = PHOTOSET_METADATA_CACHE['year'].get(year, set())
+            if base_name not in year_scenes:
+                include = False
+        
+        if has_caption is not None and include:
+            has_caption_value = image_id in image_captions
+            if has_caption != has_caption_value:
+                include = False
+        
+        if has_crop is not None and include:
+            has_crop_value = image_id in image_crops
+            if has_crop != has_crop_value:
+                include = False
+            
+        if include:
+            filtered_images.append(img_file)
+    
+    return filtered_images
+
+def calculate_pagination(
+    total_items: int,
+    page: int,
+    page_size: int
+) -> tuple[int, int, int, int]:
+    """
+    Calculate pagination parameters.
+    
+    Args:
+        total_items: Total number of items
+        page: Current page number
+        page_size: Number of items per page
+        
+    Returns:
+        Tuple of (total_pages, start_idx, end_idx, total_items)
+    """
+    total_pages = (total_items + page_size - 1) // page_size
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, total_items)
+    return total_pages, start_idx, end_idx, total_items
+
+def create_image_metadata(img_file: Path) -> ImageMetadata:
+    """
+    Create metadata for a single image.
+    
+    Args:
+        img_file: Path to the image file
+        
+    Returns:
+        ImageMetadata object containing the image's metadata
+    """
+    stat = img_file.stat()
+    image_id = str(img_file.stem)
+    base_name = '_'.join(image_id.split('_')[:-2])
+    width, height = image_dimensions.get(image_id, (None, None))
+    
+    scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
+        'actors': [],
+        'tags': [],
+        'year': None
+    })
+    
+    return ImageMetadata(
+        id=image_id,
+        filename=img_file.name,
+        size=stat.st_size,
+        created_at=datetime.fromtimestamp(stat.st_ctime),
+        mime_type=f"image/{img_file.suffix[1:].lower()}" if img_file.suffix else "application/octet-stream",
+        width=width,
+        height=height,
+        has_caption=image_id in image_captions,
+        collection_name="Default Collection",
+        has_tags=len(scene_metadata['tags']) > 0,
+        has_crop=image_id in image_crops,
+        year=scene_metadata['year'],
+        tags=scene_metadata['tags'],
+        actors=scene_metadata['actors']
+    )
+
+async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
+    """
+    Process an image for caching.
+    
+    Args:
+        image_id: ID of the image to process
+        
+    Returns:
+        Tuple of (success, was_skipped, was_error)
+    """
+    # Skip if already in cache
+    if image_id in image_cache.cache:
+        return False, True, False
+    
+    try:
+        # Get image path
+        image_path = get_image_path(image_id)
+        if not image_path:
+            return False, False, True
+        
+        # Open and optimize the image
+        with PILImage.open(image_path) as img:
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            # Create a BytesIO object to store the optimized image
+            output = io.BytesIO()
+            img.save(output, format='JPEG', quality=85, optimize=True)
+            output.seek(0)
+            
+            # Add to cache
+            image_cache.put(image_id, output.getvalue())
+            return True, False, False
+            
+    except Exception as e:
+        print(f"Error processing image {image_id}: {str(e)}")
+        return False, False, True
+
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
+    request: Request,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
     actor: Optional[str] = Query(None, description="Filter by actor name"),
@@ -471,114 +723,56 @@ async def get_images(
     start_time = time.time()
     
     # Apply filters if provided
-    filtered_images = cached_image_files
-    if actor or tag or year or has_caption is not None or has_crop is not None:
-        filter_start = time.time()
-        # Strip quotes from actor name if present and if it's a string
-        if actor and isinstance(actor, str):
-            actor = actor.strip('"\'')
-        
-        filtered_images = []
-        for img_file in cached_image_files:
-            image_id = str(img_file.stem)
-            base_name = '_'.join(image_id.split('_')[:-2])
-            include = True
-            
-            if actor:
-                actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
-                if base_name not in actor_scenes:
-                    include = False
-            
-            if tag and include:
-                tag_scenes = PHOTOSET_METADATA_CACHE['tags'].get(tag, set())
-                if base_name not in tag_scenes:
-                    include = False
-            
-            if year and include:
-                year_scenes = PHOTOSET_METADATA_CACHE['year'].get(year, set())
-                if base_name not in year_scenes:
-                    include = False
-            
-            if has_caption is not None and include:
-                has_caption_value = image_id in image_captions
-                if has_caption != has_caption_value:
-                    include = False
-            
-            if has_crop is not None and include:
-                has_crop_value = image_id in image_crops
-                if has_crop != has_crop_value:
-                    include = False
-                
-            if include:
-                filtered_images.append(img_file)
-        
-        filter_time = time.time() - filter_start
-        if filter_time > 1.0:  # Log if filtering takes more than 1 second
-            print(f"Performance: Filtering took {filter_time:.3f}s")
+    filter_start = time.time()
+    filtered_images = apply_image_filters(
+        cached_image_files,
+        actor=actor,
+        tag=tag,
+        year=year,
+        has_caption=has_caption,
+        has_crop=has_crop
+    )
+    filter_time = time.time() - filter_start
+    
+    if filter_time > 1.0:
+        print(f"Performance: Filtering took {filter_time:.3f}s")
     
     # Calculate pagination
-    total_images = len(filtered_images)
-    total_pages = (total_images + page_size - 1) // page_size
-    start_idx = (page - 1) * page_size
-    end_idx = min(start_idx + page_size, total_images)
+    total_pages, start_idx, end_idx, total_images = calculate_pagination(
+        len(filtered_images),
+        page,
+        page_size
+    )
     
     # Get images for current page
     page_images = filtered_images[start_idx:end_idx]
     
     # Create metadata for each image
     metadata_start = time.time()
-    images_metadata = []
-    for img_file in page_images:
-        stat = img_file.stat()
-        image_id = str(img_file.stem)
-        base_name = '_'.join(image_id.split('_')[:-2])
-        width, height = image_dimensions.get(image_id, (None, None))
-        
-        scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
-            'actors': [],
-            'tags': [],
-            'year': None
-        })
-        
-        metadata = ImageMetadata(
-            id=image_id,
-            filename=img_file.name,
-            size=stat.st_size,
-            created_at=datetime.fromtimestamp(stat.st_ctime),
-            mime_type=f"image/{img_file.suffix[1:].lower()}" if img_file.suffix else "application/octet-stream",
-            width=width,
-            height=height,
-            has_caption=image_id in image_captions,
-            collection_name="Default Collection",
-            has_tags=len(scene_metadata['tags']) > 0,
-            has_crop=image_id in image_crops,
-            year=scene_metadata['year'],
-            tags=scene_metadata['tags'],
-            actors=scene_metadata['actors']
-        )
-        images_metadata.append(metadata)
-    
+    images_metadata = [create_image_metadata(img_file) for img_file in page_images]
     metadata_time = time.time() - metadata_start
-    total_time = time.time() - start_time
     
-    if total_time > 1.0:  # Log if total time exceeds 1 second
+    total_time = time.time() - start_time
+    if total_time > 1.0:
         print(f"Performance: Page {page} processed in {total_time:.3f}s (metadata: {metadata_time:.3f}s)")
     
-    # Trigger cache warming for next pages in background
+    # Trigger predictive cache warming for unfiltered requests
     if not (actor or tag or year or has_caption is not None or has_crop is not None):
-        # Only warm up cache for unfiltered requests
-        asyncio.create_task(warm_up_next_pages(page))
+        asyncio.create_task(predict_and_warm_cache(page))
     
-    return ImageResponse(
+    response = ImageResponse(
         images=images_metadata,
         total=total_images,
         page=page,
         page_size=page_size,
         total_pages=total_pages
     )
+    
+    return response
 
 @app.get("/images/batch", response_model=List[ImageResponse])
 async def get_images_batch(
+    request: Request,
     start_page: int = Query(1, ge=1, description="Starting page number"),
     num_pages: int = Query(3, ge=1, le=5, description="Number of pages to fetch"),
     page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
@@ -594,6 +788,7 @@ async def get_images_batch(
     responses = []
     for page in range(start_page, start_page + num_pages):
         response = await get_images(
+            request=request,
             page=page,
             page_size=page_size,
             actor=actor,
@@ -624,22 +819,28 @@ async def get_image(image_id: str, request: Request):
             headers = {
                 "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
                 "ETag": f'"{hash(cached_image)}"',  # Use hash of image data as ETag
+                "X-Cache-Status": "HIT",  # Add cache status header
+                "X-Cache-Lookup-Time": f"{cache_time:.3f}"  # Add cache lookup time
             }
             
             # Check if client has cached version
             if_none_match = request.headers.get("if-none-match")
             if if_none_match and if_none_match == headers["ETag"]:
-                return Response(status_code=304)  # Not Modified
+                print(f"Request {request.state.request_id}: Image {image_id} - Client cache hit (304)")
+                return Response(status_code=304, headers={"X-Cache-Status": "CLIENT_HIT"})  # Not Modified
             
             total_time = time.time() - start_time
             if total_time > 1.0:  # Log if total time exceeds 1 second
                 print(f"Performance: Image {image_id} served from cache in {total_time:.3f}s (cache lookup: {cache_time:.3f}s)")
             
+            print(f"Request {request.state.request_id}: Image {image_id} - Server cache hit")
             return Response(
                 content=cached_image,
                 media_type="image/jpeg",
                 headers=headers
             )
+        
+        print(f"Request {request.state.request_id}: Image {image_id} - Cache miss")
         
         # If not in cache, get from file
         file_start = time.time()
@@ -653,29 +854,43 @@ async def get_image(image_id: str, request: Request):
         # Open and optimize the image
         process_start = time.time()
         with PILImage.open(image_file) as img:
+            open_time = time.time() - process_start
+            
+            convert_start = time.time()
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
+            convert_time = time.time() - convert_start
             
             # Create a BytesIO object to store the optimized image
+            optimize_start = time.time()
             output = io.BytesIO()
             img.save(output, format='JPEG', quality=85, optimize=True)
             output.seek(0)
+            optimize_time = time.time() - optimize_start
             
             # Add to cache
+            cache_start = time.time()
             image_data = output.getvalue()
             image_cache.put(image_id, image_data)
+            cache_time = time.time() - cache_start
             
             # Add caching headers
             headers = {
                 "Cache-Control": "public, max-age=31536000",
                 "ETag": f'"{hash(image_data)}"',
+                "X-Cache-Status": "MISS",  # Add cache status header
+                "X-File-Lookup-Time": f"{file_time:.3f}",
+                "X-Image-Open-Time": f"{open_time:.3f}",
+                "X-Image-Convert-Time": f"{convert_time:.3f}",
+                "X-Image-Optimize-Time": f"{optimize_time:.3f}",
+                "X-Cache-Store-Time": f"{cache_time:.3f}"
             }
             
             process_time = time.time() - process_start
             total_time = time.time() - start_time
             
             if total_time > 1.0:  # Log if total time exceeds 1 second
-                print(f"Performance: Image {image_id} processed in {total_time:.3f}s (file lookup: {file_time:.3f}s, processing: {process_time:.3f}s)")
+                print(f"Performance: Image {image_id} processed in {total_time:.3f}s (file lookup: {file_time:.3f}s, open: {open_time:.3f}s, convert: {convert_time:.3f}s, optimize: {optimize_time:.3f}s, cache store: {cache_time:.3f}s)")
             
             return Response(
                 content=image_data,
@@ -1057,6 +1272,85 @@ async def export_images(request: ExportRequest):
     except Exception as e:
         print(f"Error in export_images: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/cache/warmup")
+async def warmup_cache(
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
+    actor: Optional[str] = Query(None, description="Filter by actor name"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    year: Optional[str] = Query(None, description="Filter by year"),
+    has_caption: Optional[bool] = Query(None, description="Filter for images with captions"),
+    has_crop: Optional[bool] = Query(None, description="Filter for images with crops")
+):
+    """
+    Pre-warm the image cache for a specific page of images.
+    Uses the same filtering logic as the images API but performs cache warming instead of returning results.
+    """
+    start_time = time.time()
+    
+    # Apply filters if provided
+    filter_start = time.time()
+    filtered_images = apply_image_filters(
+        cached_image_files,
+        actor=actor,
+        tag=tag,
+        year=year,
+        has_caption=has_caption,
+        has_crop=has_crop
+    )
+    filter_time = time.time() - filter_start
+    
+    if filter_time > 1.0:
+        print(f"Performance: Cache warmup filtering took {filter_time:.3f}s")
+    
+    # Calculate pagination
+    total_pages, start_idx, end_idx, total_images = calculate_pagination(
+        len(filtered_images),
+        page,
+        page_size
+    )
+    
+    # Get images for current page
+    page_images = filtered_images[start_idx:end_idx]
+    
+    # Warm up cache for each image
+    warmup_start = time.time()
+    warmed_up = 0
+    skipped = 0
+    errors = 0
+    
+    for img_file in page_images:
+        image_id = str(img_file.stem)
+        success, was_skipped, was_error = await process_image_for_cache(image_id)
+        
+        if success:
+            warmed_up += 1
+        elif was_skipped:
+            skipped += 1
+        elif was_error:
+            errors += 1
+    
+    warmup_time = time.time() - warmup_start
+    total_time = time.time() - start_time
+    
+    if total_time > 1.0:
+        print(f"Performance: Cache warmup for page {page} completed in {total_time:.3f}s (warmup: {warmup_time:.3f}s)")
+    
+    response = {
+        "status": "success",
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "total_images": total_images,
+        "warmed_up": warmed_up,
+        "skipped": skipped,
+        "errors": errors,
+        "processing_time": total_time
+    }
+    
+    return response
 
 if __name__ == "__main__":
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT)
