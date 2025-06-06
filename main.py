@@ -547,6 +547,25 @@ async def get_available_filters():
         "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
     }
 
+def find_base_name(image_id: str) -> str:
+    """
+    Find the base name for an image by matching against scene metadata keys.
+    
+    The scene metadata keys contain the original base names for images. This function
+    looks for a scene metadata key that is contained within the image ID.
+    
+    Args:
+        image_id (str): The full image ID to find the base name for
+        
+    Returns:
+        str: The matching base name from scene metadata, or None if no match is found
+    """
+    scene_keys = PHOTOSET_METADATA_CACHE['scene_metadata'].keys()
+    for scene_key in scene_keys:
+        if scene_key in image_id:
+            return scene_key
+    return None
+
 def apply_image_filters(
     images: List[Path],
     actor: Optional[str] = None,
@@ -575,7 +594,7 @@ def apply_image_filters(
     filtered_images = []
     for img_file in images:
         image_id = str(img_file.stem)
-        base_name = '_'.join(image_id.split('_')[:-2])
+        base_name = find_base_name(image_id)
         include = True
         
         if actor:
@@ -641,7 +660,7 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
     """
     stat = img_file.stat()
     image_id = str(img_file.stem)
-    base_name = '_'.join(image_id.split('_')[:-2])
+    base_name = find_base_name(image_id)
     width, height = image_dimensions.get(image_id, (None, None))
     
     scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
