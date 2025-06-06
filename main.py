@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, OrderedDict
 import os
 from datetime import datetime
 import json
@@ -15,6 +15,10 @@ import time # Import time module
 from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT, PROFILING_ENABLED, PROFILING_DIR, PHOTOSET_METADATA_DIRECTORY # Import profiling config
 from caption_generator import get_caption_generator
 import uvicorn
+import threading
+from collections import OrderedDict
+import sys
+import asyncio
 
 app = FastAPI(title="Image Service API")
 
@@ -50,24 +54,60 @@ PHOTOSET_METADATA_CACHE = {
 # Initialize caption generator
 caption_generator = get_caption_generator()
 
+# Image cache implementation
+class ImageCache:
+    def __init__(self, max_size_bytes: int = 10 * 1024 * 1024 * 1024):  # 10GB default
+        self.max_size_bytes = max_size_bytes
+        self.current_size_bytes = 0
+        self.cache: OrderedDict[str, bytes] = OrderedDict()  # LRU cache
+        self.lock = threading.Lock()
+    
+    def get(self, image_id: str) -> Optional[bytes]:
+        with self.lock:
+            if image_id in self.cache:
+                # Move to end (most recently used)
+                value = self.cache.pop(image_id)
+                self.cache[image_id] = value
+                return value
+            return None
+    
+    def put(self, image_id: str, image_data: bytes):
+        with self.lock:
+            # If key exists, remove it first to update size
+            if image_id in self.cache:
+                self.current_size_bytes -= len(self.cache[image_id])
+                self.cache.pop(image_id)
+            
+            # Evict items if needed
+            while self.current_size_bytes + len(image_data) > self.max_size_bytes and self.cache:
+                # Remove least recently used item
+                _, removed_data = self.cache.popitem(last=False)
+                self.current_size_bytes -= len(removed_data)
+            
+            # Add new item
+            self.cache[image_id] = image_data
+            self.current_size_bytes += len(image_data)
+    
+    def clear(self):
+        with self.lock:
+            self.cache.clear()
+            self.current_size_bytes = 0
+
+# Initialize image cache
+image_cache = ImageCache()
+
 def read_photoset_metadata():
     global PHOTOSET_METADATA_CACHE
-    print(f"Reading photoset metadata from directory: {PHOTOSET_METADATA_DIRECTORY}")
     
     # Read all JSON files in the metadata directory
     json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
-    print(f"Found {len(json_files)} JSON files in metadata directory")
     
     for filename in json_files:
         filename_base = os.path.splitext(filename)[0]
-        print(f"\nProcessing metadata file: {filename}")
-        print(f"Base name: {filename_base}")
-
         file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
         try:
             with open(file_path, 'r') as f:
                 data = json.load(f)
-                print(f"Loaded JSON data: {data}")
                 
                 # Initialize scene metadata
                 scene_metadata = {
@@ -82,7 +122,6 @@ def read_photoset_metadata():
                     scene_set.add(filename_base)
                     PHOTOSET_METADATA_CACHE['actors'][each_actor] = scene_set
                     scene_metadata['actors'].append(each_actor)
-                    print(f"Added actor {each_actor} for scene {filename_base}")
 
                 # Process tags
                 for each_tag in data['tags']:
@@ -90,7 +129,6 @@ def read_photoset_metadata():
                     scene_set.add(filename_base)
                     PHOTOSET_METADATA_CACHE['tags'][each_tag] = scene_set
                     scene_metadata['tags'].append(each_tag)
-                    print(f"Added tag {each_tag} for scene {filename_base}")
 
                 # Process year
                 year = data['date'].split(', ')[1]
@@ -98,23 +136,13 @@ def read_photoset_metadata():
                 scene_set.add(filename_base)
                 PHOTOSET_METADATA_CACHE['year'][year] = scene_set
                 scene_metadata['year'] = year
-                print(f"Added year {year} for scene {filename_base}")
 
                 # Add scene to scenes set and store its metadata
                 PHOTOSET_METADATA_CACHE['scenes'].add(filename_base)
                 PHOTOSET_METADATA_CACHE['scene_metadata'][filename_base] = scene_metadata
-                print(f"Added scene {filename_base} to scenes set with metadata")
                                         
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Error reading {filename}: {str(e)}")
             continue
-    
-    print("\nFinal cache state:")
-    print(f"Number of actors: {len(PHOTOSET_METADATA_CACHE['actors'])}")
-    print(f"Number of tags: {len(PHOTOSET_METADATA_CACHE['tags'])}")
-    print(f"Number of years: {len(PHOTOSET_METADATA_CACHE['year'])}")
-    print(f"Number of scenes: {len(PHOTOSET_METADATA_CACHE['scenes'])}")
-    print(f"Number of scene metadata entries: {len(PHOTOSET_METADATA_CACHE['scene_metadata'])}")
 
 def load_cache(cache_file: Path) -> dict:
     """Loads cache from a JSON file."""
@@ -278,9 +306,48 @@ def get_image_path(image_id: str) -> Optional[Path]:
     image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
     return image_files[0] if image_files else None
 
+async def warm_up_cache(page: int = 1, page_size: int = IMAGES_PER_PAGE):
+    """Warm up the cache with images from a specific page"""
+    try:
+        # Get images for the page
+        response = await get_images(page=page, page_size=page_size)
+        
+        # Process each image in the page
+        for image_metadata in response.images:
+            image_id = image_metadata.id
+            if image_id not in image_cache.cache:
+                try:
+                    # Get image path
+                    image_path = get_image_path(image_id)
+                    if not image_path:
+                        continue
+                    
+                    # Open and optimize the image
+                    with PILImage.open(image_path) as img:
+                        if img.mode in ('RGBA', 'P'):
+                            img = img.convert('RGB')
+                        
+                        # Create a BytesIO object to store the optimized image
+                        output = io.BytesIO()
+                        img.save(output, format='JPEG', quality=85, optimize=True)
+                        output.seek(0)
+                        
+                        # Add to cache
+                        image_cache.put(image_id, output.getvalue())
+                except Exception as e:
+                    print(f"Error warming up cache for image {image_id}: {str(e)}")
+                    continue
+    except Exception as e:
+        print(f"Error in warm_up_cache: {str(e)}")
+
+async def warm_up_next_pages(current_page: int, num_pages: int = 10):
+    """Warm up cache for next N pages"""
+    for page in range(current_page + 1, current_page + num_pages + 1):
+        await warm_up_cache(page)
+
 @app.on_event("startup")
-async def load_all_caches():
-    """Loads all caches from files and builds the cached image file list on startup."""
+async def startup_event():
+    """Initialize caches and warm up image cache on startup"""
     print("Loading caches on startup...")
     
     # Ensure profiling directory exists if profiling is enabled
@@ -301,12 +368,17 @@ async def load_all_caches():
     cached_image_files = [
         f for f in IMAGES_DIR.glob("*") 
         if f.is_file() 
-        and f.suffix.lower() in ['.jpg', '.jpeg', '.png']  # Only include image files
-        and "_crop_" not in f.name  # Exclude cropped images
-        and not f.name.startswith('.')  # Exclude hidden files like .DS_Store
+        and f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+        and "_crop_" not in f.name
+        and not f.name.startswith('.')
     ]
     cached_image_files.sort()
     print(f"Cached image file list built with {len(cached_image_files)} files.")
+    
+    # Warm up image cache with first page
+    print("Warming up image cache...")
+    await warm_up_cache(page=1)
+    print("Image cache warmed up.")
     
     print("Caches loaded and image list built.")
 
@@ -382,25 +454,6 @@ async def get_available_filters():
         "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
     }
 
-def find_base_name(image_id: str) -> str:
-    """
-    Find the base name for an image by matching against scene metadata keys.
-    
-    The scene metadata keys contain the original base names for images. This function
-    looks for a scene metadata key that is contained within the image ID.
-    
-    Args:
-        image_id (str): The full image ID to find the base name for
-        
-    Returns:
-        str: The matching base name from scene metadata, or None if no match is found
-    """
-    scene_keys = PHOTOSET_METADATA_CACHE['scene_metadata'].keys()
-    for scene_key in scene_keys:
-        if scene_key in image_id:
-            return scene_key
-    return None
-
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
     page: int = Query(1, ge=1, description="Page number"),
@@ -413,24 +466,22 @@ async def get_images(
 ):
     """
     Get a paginated list of images with optional filtering.
+    Also triggers cache warming for next pages.
     """
+    start_time = time.time()
+    
+    # Apply filters if provided
     filtered_images = cached_image_files
     if actor or tag or year or has_caption is not None or has_crop is not None:
-        if actor:
+        filter_start = time.time()
+        # Strip quotes from actor name if present and if it's a string
+        if actor and isinstance(actor, str):
             actor = actor.strip('"\'')
         
         filtered_images = []
         for img_file in cached_image_files:
             image_id = str(img_file.stem)
-            base_name = find_base_name(image_id)
-            if base_name is None:
-                parts = image_id.split('_')
-                resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
-                if resolution_idx != -1:
-                    base_name = '_'.join(parts[:resolution_idx + 1])
-                else:
-                    base_name = '_'.join(parts[:-2])
-            
+            base_name = '_'.join(image_id.split('_')[:-2])
             include = True
             
             if actor:
@@ -460,27 +511,29 @@ async def get_images(
                 
             if include:
                 filtered_images.append(img_file)
+        
+        filter_time = time.time() - filter_start
+        if filter_time > 1.0:  # Log if filtering takes more than 1 second
+            print(f"Performance: Filtering took {filter_time:.3f}s")
     
+    # Calculate pagination
     total_images = len(filtered_images)
     total_pages = (total_images + page_size - 1) // page_size
     start_idx = (page - 1) * page_size
     end_idx = min(start_idx + page_size, total_images)
+    
+    # Get images for current page
     page_images = filtered_images[start_idx:end_idx]
     
+    # Create metadata for each image
+    metadata_start = time.time()
     images_metadata = []
     for img_file in page_images:
         stat = img_file.stat()
         image_id = str(img_file.stem)
-        base_name = find_base_name(image_id)
-        if base_name is None:
-            parts = image_id.split('_')
-            resolution_idx = next((i for i, part in enumerate(parts) if part.isdigit() and len(part) == 4), -1)
-            if resolution_idx != -1:
-                base_name = '_'.join(parts[:resolution_idx + 1])
-            else:
-                base_name = '_'.join(parts[:-2])
-        
+        base_name = '_'.join(image_id.split('_')[:-2])
         width, height = image_dimensions.get(image_id, (None, None))
+        
         scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
@@ -505,6 +558,17 @@ async def get_images(
         )
         images_metadata.append(metadata)
     
+    metadata_time = time.time() - metadata_start
+    total_time = time.time() - start_time
+    
+    if total_time > 1.0:  # Log if total time exceeds 1 second
+        print(f"Performance: Page {page} processed in {total_time:.3f}s (metadata: {metadata_time:.3f}s)")
+    
+    # Trigger cache warming for next pages in background
+    if not (actor or tag or year or has_caption is not None or has_crop is not None):
+        # Only warm up cache for unfiltered requests
+        asyncio.create_task(warm_up_next_pages(page))
+    
     return ImageResponse(
         images=images_metadata,
         total=total_images,
@@ -513,23 +577,118 @@ async def get_images(
         total_pages=total_pages
     )
 
+@app.get("/images/batch", response_model=List[ImageResponse])
+async def get_images_batch(
+    start_page: int = Query(1, ge=1, description="Starting page number"),
+    num_pages: int = Query(3, ge=1, le=5, description="Number of pages to fetch"),
+    page_size: int = Query(IMAGES_PER_PAGE, ge=1, le=100, description="Number of images per page"),
+    actor: Optional[str] = Query(None, description="Filter by actor name"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    year: Optional[str] = Query(None, description="Filter by year"),
+    has_caption: Optional[bool] = Query(None, description="Filter for images with captions"),
+    has_crop: Optional[bool] = Query(None, description="Filter for images with crops")
+):
+    """
+    Get multiple pages of images at once for efficient preloading.
+    """
+    responses = []
+    for page in range(start_page, start_page + num_pages):
+        response = await get_images(
+            page=page,
+            page_size=page_size,
+            actor=actor,
+            tag=tag,
+            year=year,
+            has_caption=has_caption,
+            has_crop=has_crop
+        )
+        responses.append(response)
+        if not response.images:  # Stop if we hit the end
+            break
+    return responses
+
 @app.get("/images/{image_id}")
-async def get_image(image_id: str):
+async def get_image(image_id: str, request: Request):
     """
-    Get a specific image by ID
+    Get a specific image by ID from cache or file
     """
+    start_time = time.time()
     try:
-        # Find the image file
+        # Try to get from cache first
+        cache_start = time.time()
+        cached_image = image_cache.get(image_id)
+        cache_time = time.time() - cache_start
+        
+        if cached_image:
+            # Add caching headers
+            headers = {
+                "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
+                "ETag": f'"{hash(cached_image)}"',  # Use hash of image data as ETag
+            }
+            
+            # Check if client has cached version
+            if_none_match = request.headers.get("if-none-match")
+            if if_none_match and if_none_match == headers["ETag"]:
+                return Response(status_code=304)  # Not Modified
+            
+            total_time = time.time() - start_time
+            if total_time > 1.0:  # Log if total time exceeds 1 second
+                print(f"Performance: Image {image_id} served from cache in {total_time:.3f}s (cache lookup: {cache_time:.3f}s)")
+            
+            return Response(
+                content=cached_image,
+                media_type="image/jpeg",
+                headers=headers
+            )
+        
+        # If not in cache, get from file
+        file_start = time.time()
         image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
         if not image_files:
             raise HTTPException(status_code=404, detail="Image not found")
         
         image_file = image_files[0]
-        return FileResponse(image_file)
+        file_time = time.time() - file_start
+        
+        # Open and optimize the image
+        process_start = time.time()
+        with PILImage.open(image_file) as img:
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            # Create a BytesIO object to store the optimized image
+            output = io.BytesIO()
+            img.save(output, format='JPEG', quality=85, optimize=True)
+            output.seek(0)
+            
+            # Add to cache
+            image_data = output.getvalue()
+            image_cache.put(image_id, image_data)
+            
+            # Add caching headers
+            headers = {
+                "Cache-Control": "public, max-age=31536000",
+                "ETag": f'"{hash(image_data)}"',
+            }
+            
+            process_time = time.time() - process_start
+            total_time = time.time() - start_time
+            
+            if total_time > 1.0:  # Log if total time exceeds 1 second
+                print(f"Performance: Image {image_id} processed in {total_time:.3f}s (file lookup: {file_time:.3f}s, processing: {process_time:.3f}s)")
+            
+            return Response(
+                content=image_data,
+                media_type="image/jpeg",
+                headers=headers
+            )
     
     except HTTPException:
         raise
     except Exception as e:
+        total_time = time.time() - start_time
+        if total_time > 1.0:  # Log if total time exceeds 1 second
+            print(f"Performance: Error processing image {image_id} after {total_time:.3f}s: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/images/{image_id}/caption")
