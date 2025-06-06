@@ -100,6 +100,9 @@ class ImageCache:
         self.lock = threading.Lock()
     
     def get(self, image_id: str) -> Optional[bytes]:
+        print(f"Getting image from cache {image_id}")
+        print(f"Cache size: {len(self.cache)} ")
+
         with self.lock:
             if image_id in self.cache:
                 # Move to end (most recently used)
@@ -109,6 +112,9 @@ class ImageCache:
             return None
     
     def put(self, image_id: str, image_data: bytes):
+        print(f"Putting image in cache {image_id}")
+        print(f"Cache size: {len(self.cache)} ")
+
         with self.lock:
             # If key exists, remove it first to update size
             if image_id in self.cache:
@@ -698,15 +704,18 @@ async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
     """
     # Skip if already in cache
     if image_id in image_cache.cache:
+        print(f"Image {image_id} already in cache")
         return False, True, False
     
     try:
         # Get image path
+        print(f"Getting image path for {image_id}")
         image_path = get_image_path(image_id)
         if not image_path:
             return False, False, True
         
         # Open and optimize the image
+        print(f"Opening image {image_path}")
         with PILImage.open(image_path) as img:
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
@@ -717,6 +726,7 @@ async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
             output.seek(0)
             
             # Add to cache
+            print(f"Adding image to cache {image_id}")
             image_cache.put(image_id, output.getvalue())
             return True, False, False
             
@@ -1307,6 +1317,9 @@ async def warmup_cache(
     Pre-warm the image cache for a specific page of images.
     Uses the same filtering logic as the images API but performs cache warming instead of returning results.
     """
+
+    print(f"Warmup cache for page {page}, page_size {page_size}, actor {actor}, tag {tag}, year {year}, has_caption {has_caption}, has_crop {has_crop}")
+
     start_time = time.time()
     
     # Apply filters if provided
