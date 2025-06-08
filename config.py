@@ -8,6 +8,7 @@ class CaptionGeneratorType(Enum):
 # Configuration settings
 # IMAGES_DIR = Path("/Users/stuartleal/gallery-project/images")
 IMAGES_DIR = Path("/mnt/d/TEST/images")
+CROPS_DIR = Path("/mnt/d/TEST/crops")
 PHOTOSET_METADATA_DIRECTORY = Path("/mnt/d/TEST/metadata")
 IMAGES_PER_PAGE = 10
 

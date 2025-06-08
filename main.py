@@ -28,6 +28,9 @@ from starlette.websockets import WebSocket
 from starlette.types import Scope, Receive, Send
 import concurrent.futures
 from functools import partial
+from controllers.CropController import router as crop_router
+from caches.crop_cache import crop_cache
+
 
 class RequestTimingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
@@ -61,14 +64,15 @@ app = FastAPI(title="Image Service API")
 # Add request timing middleware
 app.add_middleware(RequestTimingMiddleware)
 
+# Include routers
+app.include_router(crop_router)
+
 # Define cache file paths
 DIMENSIONS_CACHE_FILE = IMAGES_DIR / "dimensions_cache.json"
 CAPTIONS_CACHE_FILE = IMAGES_DIR / "captions_cache.json"
-CROPS_CACHE_FILE = IMAGES_DIR / "crops_cache.json"
 
-# In-memory storage for captions, crops, and dimensions
+# In-memory storage for captions, and dimensions
 image_captions: Dict[str, str] = {}
-image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": int, "normalizedDeltas": {"x": float, "y": float}}}
 image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
 cached_image_files: List[Path] = [] # Cache for the list of image file paths
 
@@ -243,40 +247,6 @@ def initialize_caption_cache():
             
     print(f"Caption cache initialized with {len(image_captions)} entries.")
 
-def initialize_crop_cache():
-    """
-    Load crop info from cache file and scan directory for new crop info.
-    """
-    print("Initializing crop cache...")
-    global image_crops # Declare intent to modify the global variable
-    image_crops = load_cache(CROPS_CACHE_FILE)
-    
-    # Get current crop metadata files in the directory
-    current_crop_files = {file.stem.replace('_crop_', '') for file in IMAGES_DIR.glob("*_crop_*.json")} # Use a set for faster lookup
-
-    # Find new crop files not in cache
-    new_crop_ids = current_crop_files - set(image_crops.keys())
-
-    for image_id in new_crop_ids:
-         try:
-            # Try to load metadata from JSON file for new files
-            # Assuming there might be multiple crop sizes per image, we'll just take the first one found for caching purposes
-            # A more robust approach might handle multiple crops per image ID
-            metadata_files = list(IMAGES_DIR.glob(f"{image_id}_crop_*.json"))
-            if metadata_files:
-                metadata_path = metadata_files[0]
-                with open(metadata_path, 'r') as f:
-                    metadata = json.load(f)
-                    image_crops[image_id] = {
-                        "targetSize": metadata.get("targetSize"), # Use .get() for safety
-                        "normalizedDeltas": metadata.get("normalizedDeltas") # Use .get() for safety
-                    }
-         except (ValueError, IndexError, json.JSONDecodeError) as e:
-             print(f"Error processing new crop file {metadata_path}: {e}") # Use metadata_path here
-             continue
-             
-    print(f"Crop cache initialized with {len(image_crops)} entries.")
-
 def initialize_dimension_cache():
     """
     Load dimensions from cache file and scan directory for new images.
@@ -361,93 +331,6 @@ class MockRequest:
         self.url = type('URL', (), {'path': "/background/warmup"})()
         self.headers = Headers({})
 
-async def warm_up_cache(page: int = 1, page_size: int = IMAGES_PER_PAGE):
-    """Warm up the cache with images from a specific page"""
-    try:
-        # Create a mock request for background task
-        mock_request = MockRequest()
-        
-        # Get images for the page
-        response = await get_images(
-            request=mock_request,
-            page=page,
-            page_size=page_size
-        )
-        
-        # Process each image in the page
-        for image_metadata in response.images:
-            image_id = image_metadata.id
-            if image_id not in image_cache.cache:
-                try:
-                    # Get image path
-                    image_path = get_image_path(image_id)
-                    if not image_path:
-                        continue
-                    
-                    # Open and optimize the image
-                    with PILImage.open(image_path) as img:
-                        if img.mode in ('RGBA', 'P'):
-                            img = img.convert('RGB')
-                        
-                        # Create a BytesIO object to store the optimized image
-                        output = io.BytesIO()
-                        img.save(output, format='JPEG', quality=85, optimize=True)
-                        output.seek(0)
-                        
-                        # Add to cache
-                        image_cache.put(image_id, output.getvalue())
-                except Exception as e:
-                    print(f"Error warming up cache for image {image_id}: {str(e)}")
-                    continue
-    except Exception as e:
-        print(f"Error in warm_up_cache: {str(e)}")
-
-async def warm_up_next_pages(current_page: int, num_pages: int = 10):
-    """Warm up cache for next N pages"""
-    for page in range(current_page + 1, current_page + num_pages + 1):
-        await warm_up_cache(page)
-
-async def predict_and_warm_cache(current_page: int, page_size: int = IMAGES_PER_PAGE):
-    """
-    Predict and warm up cache for likely upcoming requests based on current page.
-    This includes:
-    1. Current page images (if not already cached)
-    2. Next 3 pages (typical batch request size)
-    3. Preview sizes for current page images
-    """
-    try:
-        # Create a mock request for background task
-        mock_request = MockRequest()
-        
-        # Get current page images
-        response = await get_images(
-            request=mock_request,
-            page=current_page,
-            page_size=page_size
-        )
-        
-        # Warm up current page images
-        current_page_tasks = []
-        #for image_metadata in response.images:
-            #image_id = image_metadata.id
-            #if image_id not in image_cache.cache:
-                #current_page_tasks.append(warm_up_cache(current_page))
-        
-        # Start warming up current page images
-        if current_page_tasks:
-            asyncio.create_task(asyncio.gather(*current_page_tasks))
-        
-        # Warm up next 3 pages (typical batch size)
-        next_pages_task = asyncio.create_task(warm_up_next_pages(current_page, num_pages=3))
-        
-        # Wait for current page to complete before starting next pages
-        if current_page_tasks:
-            await asyncio.gather(*current_page_tasks)
-        await next_pages_task
-        
-    except Exception as e:
-        print(f"Error in predict_and_warm_cache: {str(e)}")
-
 @app.on_event("startup")
 async def startup_event():
     """Initialize caches and warm up image cache on startup"""
@@ -460,7 +343,7 @@ async def startup_event():
     print(f"Photoset metadata cache initialized with {len(filter_manager.metadata_cache['scenes'])} scenes")
     
     initialize_caption_cache()
-    initialize_crop_cache()
+    crop_cache.initialize()
     initialize_dimension_cache()
     
     print("Building cached image file list...")
@@ -475,10 +358,6 @@ async def startup_event():
     cached_image_files.sort()
     print(f"Cached image file list built with {len(cached_image_files)} files.")
     
-    print("Warming up image cache...")
-    await warm_up_cache(page=1)
-    print("Image cache warmed up.")
-    
     print("Caches loaded and image list built.")
 
 @app.on_event("shutdown")
@@ -486,7 +365,6 @@ async def save_all_caches():
     """Saves all caches to files on shutdown."""
     print("Saving caches on shutdown...")
     save_cache(image_captions, CAPTIONS_CACHE_FILE)
-    save_cache(image_crops, CROPS_CACHE_FILE)
     # Convert tuples in dimension cache to lists for JSON serialization
     dimensions_to_save = {k: list(v) for k, v in image_dimensions.items()}
     save_cache(dimensions_to_save, DIMENSIONS_CACHE_FILE)
@@ -522,15 +400,6 @@ class CaptionRequest(BaseModel):
 
 class CaptionResponse(BaseModel):
     caption: str
-
-class NormalizedDeltas(BaseModel):
-    x: float
-    y: float
-
-class CropRequest(BaseModel):
-    imageId: str
-    targetSize: int
-    normalizedDeltas: NormalizedDeltas
 
 class ExportRequest(BaseModel):
     imageIds: List[str]
@@ -673,7 +542,7 @@ class FilterManager:
                     include = False
             
             if has_crop is not None and include:
-                has_crop_value = image_id in image_crops
+                has_crop_value = crop_cache.has_crop_metadata(image_id)
                 if has_crop != has_crop_value:
                     include = False
                 
@@ -755,7 +624,7 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
         has_caption=image_id in image_captions,
         collection_name="Default Collection",
         has_tags=len(image_filter_metadata['tags']) > 0,
-        has_crop=image_id in image_crops,
+        has_crop=crop_cache.has_crop_metadata(image_id),
         year=image_filter_metadata['year'],
         tags=image_filter_metadata['tags'],
         actors=image_filter_metadata['actors']
@@ -1111,168 +980,6 @@ async def stream_caption(image_id: str, request: CaptionRequest):
         print(f"Error in stream_caption endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def generate_cropped_image(image: PILImage, target_size: int):
-    # Calculate scaling factor to fit within target size
-    width, height = image.size
-    scale = max(target_size / width, target_size / height)
-    new_size = (int(width * scale), int(height * scale))
-    
-    # Resize the image
-    resized = image.resize(new_size, PILImage.Resampling.LANCZOS)
-
-    return resized
-
-@app.get("/images/{image_id}/preview/{target_size}")
-async def get_image_preview(image_id: str, target_size: int):
-    """
-    Get a scaled preview of the image that fits within the target size while maintaining aspect ratio.
-    The image will be scaled down so that the smaller size fits the target, but cropping will be required to make it a square
-    """
-    try:
-        image_path = get_image_path(image_id)
-        if not image_path:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        with PILImage.open(image_path) as img:
-            resized = generate_cropped_image(img, target_size)
-            
-            # Convert to bytes
-            img_byte_arr = io.BytesIO()
-            resized.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            
-            return Response(content=img_byte_arr.getvalue(), media_type="image/png")
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/images/{image_id}/crop")
-async def get_crop(image_id: str):
-    """
-    Get crop information and cropped image for an image
-    """
-    try:
-        # Verify image exists
-        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-        if not image_files:
-            print("It's the first")
-            raise HTTPException(status_code=404, detail="Image not found")
-        
-        # Get crop info
-        crop_info = image_crops.get(image_id)
-        if not crop_info:
-            print("It's the second")
-            raise HTTPException(status_code=404, detail="No crop found for this image")
-        
-        # Get the cropped image
-        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
-        if not os.path.exists(cropped_image_path):
-            print("It's the third")
-            raise HTTPException(status_code=404, detail="Cropped image file not found")
-        
-        # Return both crop info and the cropped image
-        return {
-            "cropInfo": crop_info,
-            "imageUrl": f"/images/{image_id}/cropped"
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/images/{image_id}/cropped")
-async def get_cropped_image(image_id: str):
-    """
-    Get the cropped image file
-    """
-    try:
-        # Get crop info to determine the file path
-        crop_info = image_crops.get(image_id)
-        if not crop_info:
-            raise HTTPException(status_code=404, detail="No crop found for this image")
-        
-        # Get the cropped image path with _crop_ in the filename
-        cropped_image_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
-        if not os.path.exists(cropped_image_path):
-            raise HTTPException(status_code=404, detail="Cropped image file not found")
-        
-        return FileResponse(cropped_image_path)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/images/{image_id}/crop")
-async def crop_image(image_id: str, crop_request: CropRequest):
-    """
-    Crop an image according to the specified deltas and target size.
-    """
-    try:
-        image_path = get_image_path(image_id)
-        if not image_path:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        with PILImage.open(image_path) as img:
-            # First resize the image to fit within target size
-            resized = generate_cropped_image(img, crop_request.targetSize)
-            
-            targetX = crop_request.normalizedDeltas.x * resized.width;
-            targetY = crop_request.normalizedDeltas.y * resized.height;
-
-            # Calculate slack (extra space) in both dimensions
-            horizontal_slack = resized.width - crop_request.targetSize
-            vertical_slack = resized.height - crop_request.targetSize
-            
-            # Add half of the slack to center the crop
-            targetX += horizontal_slack / 2
-            targetY += vertical_slack / 2
-
-            # Generate the square sizes
-            crop_width = crop_height = crop_request.targetSize;
-            
-            print(f"Crop properties:")
-            print(f"  x: {targetX}")
-            print(f"  y: {targetY}")
-            print(f"  width: {crop_width}")
-            print(f"  height: {crop_height}")
-            
-            # Perform the crop on the resized image
-            cropped = resized.crop((targetX, targetY, targetX + crop_width, targetY + crop_height))
-            
-            # Convert to bytes
-            img_byte_arr = io.BytesIO()
-            cropped.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-
-            # Save the cropped image with _crop_ in the filename
-            save_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_request.targetSize}.png")
-            cropped.save(save_path, format='PNG')
-            
-            # Create crop metadata
-            crop_metadata = {
-                "targetSize": crop_request.targetSize,
-                "normalizedDeltas": {
-                    "x": crop_request.normalizedDeltas.x,
-                    "y": crop_request.normalizedDeltas.y
-                }
-            }
-            
-            # Save metadata to JSON file
-            metadata_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_request.targetSize}.json")
-            with open(metadata_path, 'w') as f:
-                json.dump(crop_metadata, f, indent=2)
-            
-            # Store crop information in memory
-            image_crops[image_id] = crop_metadata
-            
-            return Response(content=img_byte_arr.getvalue(), media_type="image/png")
-            
-    except Exception as e:
-        print(e)
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/export-images")
 async def export_images(request: ExportRequest):
     try:
@@ -1296,16 +1003,16 @@ async def export_images(request: ExportRequest):
                 print(f"  Base name: {base_name}")
                 
                 # Add cropped image if it exists
-                if image_id in image_crops:
-                    crop_info = image_crops[image_id]
-                    crop_path = os.path.join(IMAGES_DIR, f"{image_id}_crop_{crop_info['targetSize']}.png")
+                if crop_cache.has_crop_metadata(image_id):
+                    crop_path = crop_cache.get_crop_image_path(image_id)
                     print(f"  Checking for crop at: {crop_path}")
+
+                    cropped_image_bytes = crop_cache.get_crop_image(image_id)
                     
-                    if os.path.exists(crop_path):
+                    if cropped_image_bytes:
                         print(f"  Adding cropped image to zip")
-                        with open(crop_path, 'rb') as f:
-                            # Use the same base name for both crop and caption
-                            zip_file.writestr(f"{base_name}.png", f.read())
+
+                        zip_file.writestr(f"{base_name}.png", cropped_image_bytes)
                     else:
                         print(f"  Warning: Crop file not found at {crop_path}")
                 else:
