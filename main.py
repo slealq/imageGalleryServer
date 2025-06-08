@@ -72,15 +72,6 @@ image_crops: Dict[str, dict] = {}  # Store crop info: {imageId: {"targetSize": i
 image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
 cached_image_files: List[Path] = [] # Cache for the list of image file paths
 
-# Initialize photoset metadata cache
-PHOTOSET_METADATA_CACHE = {
-    'actors': {},  # actor_name -> set of scene_ids
-    'tags': {},    # tag_name -> set of scene_ids
-    'year': {},    # year -> set of scene_ids
-    'scenes': set(),  # set of all scene_ids
-    'scene_metadata': {}  # scene_id -> {actors: [], tags: [], year: str}
-}
-
 # Initialize caption generator
 caption_generator = get_caption_generator()
 
@@ -199,53 +190,6 @@ async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
         print(f"Error processing image {image_id}: {str(e)}")
         return False, False, True
 
-def read_photoset_metadata():
-    global PHOTOSET_METADATA_CACHE
-    
-    # Read all JSON files in the metadata directory
-    json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
-    
-    for filename in json_files:
-        filename_base = os.path.splitext(filename)[0]
-        file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-                
-                # Initialize scene metadata
-                scene_metadata = {
-                    'actors': [],
-                    'tags': [],
-                    'year': None
-                }
-                
-                # Process actors
-                for each_actor in data['actors']:
-                    scene_set = PHOTOSET_METADATA_CACHE['actors'].get(each_actor, set())
-                    scene_set.add(filename_base)
-                    PHOTOSET_METADATA_CACHE['actors'][each_actor] = scene_set
-                    scene_metadata['actors'].append(each_actor)
-
-                # Process tags
-                for each_tag in data['tags']:
-                    scene_set = PHOTOSET_METADATA_CACHE['tags'].get(each_tag, set())
-                    scene_set.add(filename_base)
-                    PHOTOSET_METADATA_CACHE['tags'][each_tag] = scene_set
-                    scene_metadata['tags'].append(each_tag)
-
-                # Process year
-                year = data['date'].split(', ')[1]
-                scene_set = PHOTOSET_METADATA_CACHE['year'].get(year, set())
-                scene_set.add(filename_base)
-                PHOTOSET_METADATA_CACHE['year'][year] = scene_set
-                scene_metadata['year'] = year
-
-                # Add scene to scenes set and store its metadata
-                PHOTOSET_METADATA_CACHE['scenes'].add(filename_base)
-                PHOTOSET_METADATA_CACHE['scene_metadata'][filename_base] = scene_metadata
-                                        
-        except (json.JSONDecodeError, IOError) as e:
-            continue
 
 def load_cache(cache_file: Path) -> dict:
     """Loads cache from a JSON file."""
@@ -484,10 +428,10 @@ async def predict_and_warm_cache(current_page: int, page_size: int = IMAGES_PER_
         
         # Warm up current page images
         current_page_tasks = []
-        for image_metadata in response.images:
-            image_id = image_metadata.id
-            if image_id not in image_cache.cache:
-                current_page_tasks.append(warm_up_cache(current_page))
+        #for image_metadata in response.images:
+            #image_id = image_metadata.id
+            #if image_id not in image_cache.cache:
+                #current_page_tasks.append(warm_up_cache(current_page))
         
         # Start warming up current page images
         if current_page_tasks:
@@ -509,19 +453,16 @@ async def startup_event():
     """Initialize caches and warm up image cache on startup"""
     print("Loading caches on startup...")
     
-    # Ensure profiling directory exists if profiling is enabled
     if PROFILING_ENABLED:
         PROFILING_DIR.mkdir(exist_ok=True)
     
-    # Initialize photoset metadata cache
-    read_photoset_metadata()
-    print(f"Photoset metadata cache initialized with {len(PHOTOSET_METADATA_CACHE['scenes'])} scenes")
-        
+    filter_manager.read_photoset_metadata()
+    print(f"Photoset metadata cache initialized with {len(filter_manager.metadata_cache['scenes'])} scenes")
+    
     initialize_caption_cache()
     initialize_crop_cache()
     initialize_dimension_cache()
     
-    # Build cached image file list on startup
     print("Building cached image file list...")
     global cached_image_files
     cached_image_files = [
@@ -534,7 +475,6 @@ async def startup_event():
     cached_image_files.sort()
     print(f"Cached image file list built with {len(cached_image_files)} files.")
     
-    # Warm up image cache with first page
     print("Warming up image cache...")
     await warm_up_cache(page=1)
     print("Image cache warmed up.")
@@ -607,30 +547,147 @@ async def get_available_filters():
     """
     Get all available filters (actors, tags, years) that can be used to filter images.
     """
-    return {
-        "actors": sorted(PHOTOSET_METADATA_CACHE['actors'].keys()),
-        "tags": sorted(PHOTOSET_METADATA_CACHE['tags'].keys()),
-        "years": sorted(PHOTOSET_METADATA_CACHE['year'].keys())
-    }
+
+    return filter_manager.get_available_filters()
+
+class FilterManager:
+    """Manages image filtering operations."""
+    
+    def __init__(self):
+        self.metadata_cache = {
+            'actors': {},  # actor_name -> set of scene_ids
+            'tags': {},    # tag_name -> set of scene_ids
+            'year': {},    # year -> set of scene_ids
+            'scenes': set(),  # set of all scene_ids
+            'scene_metadata': {}  # scene_id -> {actors: [], tags: [], year: str}
+        }
+
+    def get_available_filters(self):
+        return {
+            "actors": sorted(self.metadata_cache['actors'].keys()),
+            "tags": sorted(self.metadata_cache['tags'].keys()),
+            "years": sorted(self.metadata_cache['year'].keys())
+        }
+    
+    def get_image_filter_metadata(self, image_id: str):
+        base_name = self.find_base_name(image_id)
+
+        return  self.metadata_cache['scene_metadata'].get(base_name, {
+            'actors': [],
+            'tags': [],
+            'year': None
+        })
+    
+    def read_photoset_metadata(self):
+        """Read and cache photoset metadata from JSON files."""
+        # Read all JSON files in the metadata directory
+        json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
+        
+        for filename in json_files:
+            filename_base = os.path.splitext(filename)[0]
+            file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
+            try:
+                with open(file_path, 'r') as f:
+                    data = json.load(f)
+                    
+                    # Initialize scene metadata
+                    scene_metadata = {
+                        'actors': [],
+                        'tags': [],
+                        'year': None
+                    }
+                    
+                    # Process actors
+                    for each_actor in data['actors']:
+                        scene_set = self.metadata_cache['actors'].get(each_actor, set())
+                        scene_set.add(filename_base)
+                        self.metadata_cache['actors'][each_actor] = scene_set
+                        scene_metadata['actors'].append(each_actor)
+
+                    # Process tags
+                    for each_tag in data['tags']:
+                        scene_set = self.metadata_cache['tags'].get(each_tag, set())
+                        scene_set.add(filename_base)
+                        self.metadata_cache['tags'][each_tag] = scene_set
+                        scene_metadata['tags'].append(each_tag)
+
+                    # Process year
+                    year = data['date'].split(', ')[1]
+                    scene_set = self.metadata_cache['year'].get(year, set())
+                    scene_set.add(filename_base)
+                    self.metadata_cache['year'][year] = scene_set
+                    scene_metadata['year'] = year
+
+                    # Add scene to scenes set and store its metadata
+                    self.metadata_cache['scenes'].add(filename_base)
+                    self.metadata_cache['scene_metadata'][filename_base] = scene_metadata
+                                            
+            except (json.JSONDecodeError, IOError) as e:
+                continue
+    
+    def find_base_name(self, image_id: str) -> str:
+        """Find the base name for an image by matching against scene metadata keys."""
+        scene_keys = self.metadata_cache['scene_metadata'].keys()
+        for scene_key in scene_keys:
+            if scene_key in image_id:
+                return scene_key
+        return None
+    
+    def apply_filters(
+        self,
+        images: List[Path],
+        actor: Optional[str] = None,
+        tag: Optional[str] = None,
+        year: Optional[str] = None,
+        has_caption: Optional[bool] = None,
+        has_crop: Optional[bool] = None
+    ) -> List[Path]:
+        """Apply filters to a list of images based on the provided criteria."""
+        if not any([actor, tag, year, has_caption is not None, has_crop is not None]):
+            return images
+            
+        filtered_images = []
+        for img_file in images:
+            image_id = str(img_file.stem)
+            base_name = self.find_base_name(image_id)
+            include = True
+            
+            if actor:
+                actor_scenes = self.metadata_cache['actors'].get(actor, set())
+                if base_name not in actor_scenes:
+                    include = False
+            
+            if tag and include:
+                tag_scenes = self.metadata_cache['tags'].get(tag, set())
+                if base_name not in tag_scenes:
+                    include = False
+            
+            if year and include:
+                year_scenes = self.metadata_cache['year'].get(year, set())
+                if base_name not in year_scenes:
+                    include = False
+            
+            if has_caption is not None and include:
+                has_caption_value = image_id in image_captions
+                if has_caption != has_caption_value:
+                    include = False
+            
+            if has_crop is not None and include:
+                has_crop_value = image_id in image_crops
+                if has_crop != has_crop_value:
+                    include = False
+                
+            if include:
+                filtered_images.append(img_file)
+        
+        return filtered_images
+
+# Initialize filter manager
+filter_manager = FilterManager()
 
 def find_base_name(image_id: str) -> str:
-    """
-    Find the base name for an image by matching against scene metadata keys.
-    
-    The scene metadata keys contain the original base names for images. This function
-    looks for a scene metadata key that is contained within the image ID.
-    
-    Args:
-        image_id (str): The full image ID to find the base name for
-        
-    Returns:
-        str: The matching base name from scene metadata, or None if no match is found
-    """
-    scene_keys = PHOTOSET_METADATA_CACHE['scene_metadata'].keys()
-    for scene_key in scene_keys:
-        if scene_key in image_id:
-            return scene_key
-    return None
+    """Find the base name for an image by matching against scene metadata keys."""
+    return filter_manager.find_base_name(image_id)
 
 def apply_image_filters(
     images: List[Path],
@@ -640,58 +697,15 @@ def apply_image_filters(
     has_caption: Optional[bool] = None,
     has_crop: Optional[bool] = None
 ) -> List[Path]:
-    """
-    Apply filters to a list of images based on the provided criteria.
-    
-    Args:
-        images: List of image paths to filter
-        actor: Filter by actor name
-        tag: Filter by tag
-        year: Filter by year
-        has_caption: Filter for images with captions
-        has_crop: Filter for images with crops
-        
-    Returns:
-        List of filtered image paths
-    """
-    if not any([actor, tag, year, has_caption is not None, has_crop is not None]):
-        return images
-        
-    filtered_images = []
-    for img_file in images:
-        image_id = str(img_file.stem)
-        base_name = find_base_name(image_id)
-        include = True
-        
-        if actor:
-            actor_scenes = PHOTOSET_METADATA_CACHE['actors'].get(actor, set())
-            if base_name not in actor_scenes:
-                include = False
-        
-        if tag and include:
-            tag_scenes = PHOTOSET_METADATA_CACHE['tags'].get(tag, set())
-            if base_name not in tag_scenes:
-                include = False
-        
-        if year and include:
-            year_scenes = PHOTOSET_METADATA_CACHE['year'].get(year, set())
-            if base_name not in year_scenes:
-                include = False
-        
-        if has_caption is not None and include:
-            has_caption_value = image_id in image_captions
-            if has_caption != has_caption_value:
-                include = False
-        
-        if has_crop is not None and include:
-            has_crop_value = image_id in image_crops
-            if has_crop != has_crop_value:
-                include = False
-            
-        if include:
-            filtered_images.append(img_file)
-    
-    return filtered_images
+    """Apply filters to a list of images based on the provided criteria."""
+    return filter_manager.apply_filters(
+        images,
+        actor=actor,
+        tag=tag,
+        year=year,
+        has_caption=has_caption,
+        has_crop=has_crop
+    )
 
 def calculate_pagination(
     total_items: int,
@@ -726,14 +740,9 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
     """
     stat = img_file.stat()
     image_id = str(img_file.stem)
-    base_name = find_base_name(image_id)
     width, height = image_dimensions.get(image_id, (None, None))
-    
-    scene_metadata = PHOTOSET_METADATA_CACHE['scene_metadata'].get(base_name, {
-        'actors': [],
-        'tags': [],
-        'year': None
-    })
+
+    image_filter_metadata = filter_manager.get_image_filter_metadata(image_id)
     
     return ImageMetadata(
         id=image_id,
@@ -745,11 +754,11 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
         height=height,
         has_caption=image_id in image_captions,
         collection_name="Default Collection",
-        has_tags=len(scene_metadata['tags']) > 0,
+        has_tags=len(image_filter_metadata['tags']) > 0,
         has_crop=image_id in image_crops,
-        year=scene_metadata['year'],
-        tags=scene_metadata['tags'],
-        actors=scene_metadata['actors']
+        year=image_filter_metadata['year'],
+        tags=image_filter_metadata['tags'],
+        actors=image_filter_metadata['actors']
     )
 
 @app.get("/images", response_model=ImageResponse)
@@ -804,8 +813,8 @@ async def get_images(
         print(f"Performance: Page {page} processed in {total_time:.3f}s (metadata: {metadata_time:.3f}s)")
     
     # Trigger predictive cache warming for unfiltered requests
-    if not (actor or tag or year or has_caption is not None or has_crop is not None):
-        asyncio.create_task(predict_and_warm_cache(page))
+    # if not (actor or tag or year or has_caption is not None or has_crop is not None):
+        # asyncio.create_task(predict_and_warm_cache(page))
     
     response = ImageResponse(
         images=images_metadata,
