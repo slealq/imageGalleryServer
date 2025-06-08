@@ -26,6 +26,8 @@ from starlette.datastructures import Headers
 from starlette.requests import Request as StarletteRequest
 from starlette.websockets import WebSocket
 from starlette.types import Scope, Receive, Send
+import concurrent.futures
+from functools import partial
 
 class RequestTimingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
@@ -59,15 +61,6 @@ app = FastAPI(title="Image Service API")
 # Add request timing middleware
 app.add_middleware(RequestTimingMiddleware)
 
-# Enable CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Define cache file paths
 DIMENSIONS_CACHE_FILE = IMAGES_DIR / "dimensions_cache.json"
 CAPTIONS_CACHE_FILE = IMAGES_DIR / "captions_cache.json"
@@ -97,13 +90,19 @@ class ImageCache:
         self.max_size_bytes = max_size_bytes
         self.current_size_bytes = 0
         self.cache: OrderedDict[str, bytes] = OrderedDict()  # LRU cache
-        self.lock = threading.Lock()
+        self.locks: Dict[str, asyncio.Lock] = {}  # Per-image locks
     
-    def get(self, image_id: str) -> Optional[bytes]:
+    def _get_lock(self, image_id: str) -> asyncio.Lock:
+        """Get or create a lock for a specific image ID."""
+        if image_id not in self.locks:
+            self.locks[image_id] = asyncio.Lock()
+        return self.locks[image_id]
+    
+    async def get(self, image_id: str) -> Optional[bytes]:
         print(f"Getting image from cache {image_id}")
         print(f"Cache size: {len(self.cache)} ")
 
-        with self.lock:
+        async with self._get_lock(image_id):
             if image_id in self.cache:
                 # Move to end (most recently used)
                 value = self.cache.pop(image_id)
@@ -111,11 +110,11 @@ class ImageCache:
                 return value
             return None
     
-    def put(self, image_id: str, image_data: bytes):
+    async def put(self, image_id: str, image_data: bytes):
         print(f"Putting image in cache {image_id}")
         print(f"Cache size: {len(self.cache)} ")
 
-        with self.lock:
+        async with self._get_lock(image_id):
             # If key exists, remove it first to update size
             if image_id in self.cache:
                 self.current_size_bytes -= len(self.cache[image_id])
@@ -132,12 +131,73 @@ class ImageCache:
             self.current_size_bytes += len(image_data)
     
     def clear(self):
-        with self.lock:
-            self.cache.clear()
-            self.current_size_bytes = 0
+        self.cache.clear()
+        self.current_size_bytes = 0
+        self.locks.clear()  # Clear all locks when cache is cleared
 
 # Initialize image cache
 image_cache = ImageCache()
+
+# Create a thread pool for CPU-bound operations
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+def process_image_in_thread(image_path: Path) -> Optional[bytes]:
+    """Process an image in a separate thread."""
+    try:
+        with PILImage.open(image_path) as img:
+            # Convert to RGB if needed
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            # Create a BytesIO object to store the optimized image
+            output = io.BytesIO()
+            # Use faster optimization settings
+            img.save(output, format='JPEG', quality=85, optimize=False)
+            output.seek(0)
+            return output.getvalue()
+    except Exception as e:
+        print(f"Error processing image {image_path}: {str(e)}")
+        return None
+
+async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
+    """
+    Process an image for caching.
+    
+    Args:
+        image_id: ID of the image to process
+        
+    Returns:
+        Tuple of (success, was_skipped, was_error)
+    """
+    # Skip if already in cache
+    cached_image = await image_cache.get(image_id)
+    if cached_image:
+        print(f"Image {image_id} already in cache")
+        return False, True, False
+    
+    try:
+        # Get image path
+        image_path = get_image_path(image_id)
+        if not image_path:
+            return False, False, True
+        
+        # Process image in thread pool
+        loop = asyncio.get_event_loop()
+        image_data = await loop.run_in_executor(
+            thread_pool,
+            partial(process_image_in_thread, image_path)
+        )
+        
+        if not image_data:
+            return False, False, True
+            
+        # Add to cache
+        await image_cache.put(image_id, image_data)
+        return True, False, False
+            
+    except Exception as e:
+        print(f"Error processing image {image_id}: {str(e)}")
+        return False, False, True
 
 def read_photoset_metadata():
     global PHOTOSET_METADATA_CACHE
@@ -692,48 +752,6 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
         actors=scene_metadata['actors']
     )
 
-async def process_image_for_cache(image_id: str) -> tuple[bool, bool, bool]:
-    """
-    Process an image for caching.
-    
-    Args:
-        image_id: ID of the image to process
-        
-    Returns:
-        Tuple of (success, was_skipped, was_error)
-    """
-    # Skip if already in cache
-    if image_id in image_cache.cache:
-        print(f"Image {image_id} already in cache")
-        return False, True, False
-    
-    try:
-        # Get image path
-        print(f"Getting image path for {image_id}")
-        image_path = get_image_path(image_id)
-        if not image_path:
-            return False, False, True
-        
-        # Open and optimize the image
-        print(f"Opening image {image_path}")
-        with PILImage.open(image_path) as img:
-            if img.mode in ('RGBA', 'P'):
-                img = img.convert('RGB')
-            
-            # Create a BytesIO object to store the optimized image
-            output = io.BytesIO()
-            img.save(output, format='JPEG', quality=85, optimize=True)
-            output.seek(0)
-            
-            # Add to cache
-            print(f"Adding image to cache {image_id}")
-            image_cache.put(image_id, output.getvalue())
-            return True, False, False
-            
-    except Exception as e:
-        print(f"Error processing image {image_id}: {str(e)}")
-        return False, False, True
-
 @app.get("/images", response_model=ImageResponse)
 async def get_images(
     request: Request,
@@ -837,10 +855,22 @@ async def get_image(image_id: str, request: Request):
     Get a specific image by ID from cache or file
     """
     start_time = time.time()
+    incoming_latency = None
+    
+    # Get request start timestamp from header
+    request_start = request.headers.get("X-Request-Start-Timestamp")
+    if request_start:
+        try:
+            request_start = float(request_start)
+            incoming_latency = start_time - request_start
+            print(f"Request {request.state.request_id}: Incoming network latency: {incoming_latency:.3f}s")
+        except (ValueError, TypeError):
+            print(f"Request {request.state.request_id}: Invalid request-start-timestamp header")
+    
     try:
         # Try to get from cache first
         cache_start = time.time()
-        cached_image = image_cache.get(image_id)
+        cached_image = await image_cache.get(image_id)
         cache_time = time.time() - cache_start
         
         if cached_image:
@@ -849,7 +879,9 @@ async def get_image(image_id: str, request: Request):
                 "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
                 "ETag": f'"{hash(cached_image)}"',  # Use hash of image data as ETag
                 "X-Cache-Status": "HIT",  # Add cache status header
-                "X-Cache-Lookup-Time": f"{cache_time:.3f}"  # Add cache lookup time
+                "X-Cache-Lookup-Time": f"{cache_time:.3f}",  # Add cache lookup time
+                "X-Response-Start-Timestamp": f"{time.time()}",  # Add response start timestamp
+                "X-Incoming-Latency": f"{incoming_latency:.3f}" if incoming_latency is not None else "N/A"  # Add incoming latency
             }
             
             # Check if client has cached version
@@ -900,7 +932,7 @@ async def get_image(image_id: str, request: Request):
             # Add to cache
             cache_start = time.time()
             image_data = output.getvalue()
-            image_cache.put(image_id, image_data)
+            await image_cache.put(image_id, image_data)
             cache_time = time.time() - cache_start
             
             # Add caching headers
@@ -912,7 +944,9 @@ async def get_image(image_id: str, request: Request):
                 "X-Image-Open-Time": f"{open_time:.3f}",
                 "X-Image-Convert-Time": f"{convert_time:.3f}",
                 "X-Image-Optimize-Time": f"{optimize_time:.3f}",
-                "X-Cache-Store-Time": f"{cache_time:.3f}"
+                "X-Cache-Store-Time": f"{cache_time:.3f}",
+                "response-start-timestamp": f"{time.time()}",  # Add response start timestamp
+                "X-Incoming-Latency": f"{incoming_latency:.3f}" if incoming_latency is not None else "N/A"  # Add incoming latency
             }
             
             process_time = time.time() - process_start
@@ -1347,16 +1381,23 @@ async def warmup_cache(
     # Get images for current page
     page_images = filtered_images[start_idx:end_idx]
     
-    # Warm up cache for each image
+    # Warm up cache for each image in parallel
     warmup_start = time.time()
     warmed_up = 0
     skipped = 0
     errors = 0
     
+    # Create tasks for all images
+    tasks = []
     for img_file in page_images:
         image_id = str(img_file.stem)
-        success, was_skipped, was_error = await process_image_for_cache(image_id)
-        
+        tasks.append(process_image_for_cache(image_id))
+    
+    # Wait for all tasks to complete
+    results = await asyncio.gather(*tasks)
+    
+    # Process results
+    for success, was_skipped, was_error in results:
         if success:
             warmed_up += 1
         elif was_skipped:
