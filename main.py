@@ -221,6 +221,12 @@ class CaptionRequest(BaseModel):
 class CaptionResponse(BaseModel):
     caption: str
 
+class TagResponse(BaseModel):
+    tags: List[str]
+
+class AddTagRequest(BaseModel):
+    tag: str
+
 class ExportRequest(BaseModel):
     imageIds: List[str]
 
@@ -600,6 +606,48 @@ async def get_caption(image_id: str):
             raise HTTPException(status_code=404, detail="No caption found for this image")
         
         return CaptionResponse(caption=caption)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/images/{image_id}/tags", response_model=TagResponse)
+async def get_image_tags(image_id: str):
+    """
+    Get all tags for an image (both scene and image-specific tags)
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Get all tags for the image
+        tags = filter_manager.get_tags_for_image(image_id)
+        
+        return TagResponse(tags=tags)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/images/{image_id}/tags")
+async def add_image_tag(image_id: str, request: AddTagRequest):
+    """
+    Add a tag to an image
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Add the tag
+        filter_manager.set_tags_in_file_for_image(image_id, [request.tag])
+        
+        return {"message": f"Tag '{request.tag}' added successfully"}
     
     except HTTPException:
         raise

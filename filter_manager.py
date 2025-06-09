@@ -28,6 +28,7 @@ class FilterManager:
         self.image_captions: Dict[str, str] = {}
         self.image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
         self.cached_image_files: List[Path] = [] # Cache for the list of image file paths
+        self.image_metadata: Dict[str, Dict] = {}
 
     def get_image_path(image_id: str) -> Optional[Path]:
         """Get the full path of an image file by its ID."""
@@ -36,20 +37,34 @@ class FilterManager:
         return image_files[0] if image_files else None
 
     def get_available_filters(self):
+
+        # Get all image tags from image metadata
+        all_per_image_tags = set()
+
+        for image_id, metadata in self.image_metadata.items():
+            if 'tags' in metadata:
+                for tag in metadata['tags']:
+                    file_tags = self.metadata_cache['tags'].get(tag, set())
+                    all_per_image_tags.extend(file_tags)
+
         return {
             "actors": sorted(self.metadata_cache['actors'].keys()),
-            "tags": sorted(self.metadata_cache['tags'].keys()),
+            "tags": sorted(self.metadata_cache['tags'].keys() + all_per_image_tags),
             "years": sorted(self.metadata_cache['year'].keys())
         }
     
     def get_image_filter_metadata(self, image_id: str):
         base_name = self.find_base_name(image_id)
 
-        return  self.metadata_cache['scene_metadata'].get(base_name, {
+        tags_for_image = self.get_tags_from_file_for_image(image_id)
+
+        image_metadata =  self.metadata_cache['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
             'year': None
         })
+
+        image_metadata["tags"].extend(tags_for_image)
     
     def read_photoset_metadata(self):
         """Read and cache photoset metadata from JSON files."""
@@ -132,7 +147,8 @@ class FilterManager:
             
             if tag and include:
                 tag_scenes = self.metadata_cache['tags'].get(tag, set())
-                if base_name not in tag_scenes:
+                tags_for_image = self.get_tags_from_file_for_image(image_id)
+                if base_name not in tag_scenes and tag not in tags_for_image:
                     include = False
             
             if year and include:
@@ -274,6 +290,70 @@ class FilterManager:
 
         return width, height
 
+    def get_tags_from_file_for_image(self, image_id: str) -> dict:
+        """Get image-specific metadata from the metadata file.
+        
+        Args:
+            image_id: The ID of the image to get metadata for
+            
+        Returns:
+            dict: A dictionary containing the image's metadata, or an empty dict if none exists
+        """
+        return self.image_metadata.get(image_id, {}).get("tags", set())
+
+    def set_tags_in_file_for_image(self, image_id: str, tags: List) -> None:
+        """Set image-specific metadata in the metadata file.
+        
+        Args:
+            image_id: The ID of the image to set metadata for
+            tags: A list of tags to add
+        """
+        # Initialize metadata structure if it doesn't exist
+        if image_id not in self.image_metadata:
+            self.image_metadata[image_id] = {}
+        
+        # Get current tags, ensuring it's a list
+        current_tags = self.image_metadata[image_id].get("tags", [])
+        if isinstance(current_tags, set):
+            current_tags = list(current_tags)
+        
+        # Add new tags
+        current_tags.extend(tags)
+
+        # Convert to tags
+        current_tags = set(current_tags)
+        
+        # Update metadata
+        self.image_metadata[image_id]["tags"] = list(current_tags)
+        
+        # Save back to file
+        self.save_cache(self.image_metadata, self.IMAGE_METADATA_FILE)
+
+    def get_tags_for_image(self, image_id: str) -> dict:
+        """Get combined metadata for an image, including both file-specific and scene metadata.
+        
+        Args:
+            image_id: The ID of the image to get combined metadata for
+            
+        Returns:
+            dict: A dictionary containing the combined metadata
+        """
+        tags_for_image = self.get_tags_from_file_for_image(image_id)
+        
+        # Get scene metadata
+        base_name = self.find_base_name(image_id)
+        scene_metadata = self.metadata_cache['scene_metadata'].get(base_name, {
+            'actors': [],
+            'tags': [],
+            'year': None
+        })
+        
+        # Combine the metadata - convert both to lists before concatenation
+        scene_tags = list(scene_metadata["tags"])
+        image_tags = list(tags_for_image) if isinstance(tags_for_image, set) else tags_for_image
+        
+        return scene_tags + image_tags
+
     def save_all_caches(self):
         """Saves all caches to files."""
         print("Saving caches...")
@@ -304,6 +384,11 @@ class FilterManager:
         ]
         self.cached_image_files.sort()
         print(f"Cached image file list built with {len(self.cached_image_files)} files.")
+
+        print(f"Initializing image metadata cache")
+        self.image_metadata = self.load_cache(self.IMAGE_METADATA_FILE)
+
+        print(f"Image metadata cache initialized with {len(self.image_metadata)} entries")
         
         print("Caches loaded and image list built.") 
 
