@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 from PIL import Image as PILImage
-from config import IMAGES_DIR, PHOTOSET_METADATA_DIRECTORY
+from config import METADATA_DIRECTORY, PHOTOSET_METADATA_DIRECTORY, CAPTIONS_DIRECTORY, IMAGES_DIR, IMAGE_METADATA_DIRECTORY
 from caches.crop_cache import crop_cache
 
 class FilterManager:
@@ -19,13 +19,21 @@ class FilterManager:
         }
         
         # Define cache file paths
-        self.DIMENSIONS_CACHE_FILE = IMAGES_DIR / "dimensions_cache.json"
-        self.CAPTIONS_CACHE_FILE = IMAGES_DIR / "captions_cache.json"
+        self.DIMENSIONS_CACHE_FILE = METADATA_DIRECTORY / "dimensions_cache.json"
+        self.CAPTIONS_CACHE_FILE = METADATA_DIRECTORY / "captions_cache.json"
+        # the image metadata contains information that's only relevant for each image, and unique for it
+        self.IMAGE_METADATA_FILE = IMAGE_METADATA_DIRECTORY / "metadata.json"
         
         # In-memory storage for captions, and dimensions
         self.image_captions: Dict[str, str] = {}
         self.image_dimensions: Dict[str, tuple[int, int]] = {} # Store dimensions: {imageId: (width, height)}
         self.cached_image_files: List[Path] = [] # Cache for the list of image file paths
+
+    def get_image_path(image_id: str) -> Optional[Path]:
+        """Get the full path of an image file by its ID."""
+        # This function is correct as is
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        return image_files[0] if image_files else None
 
     def get_available_filters(self):
         return {
@@ -178,7 +186,7 @@ class FilterManager:
         self.image_captions = self.load_cache(self.CAPTIONS_CACHE_FILE)
         
         # Get current caption files in the directory
-        current_caption_files = {file.stem.replace('_caption', '') for file in IMAGES_DIR.glob("*_caption.txt")} # Use a set for faster lookup
+        current_caption_files = {file.stem.replace('_caption', '') for file in CAPTIONS_DIRECTORY.glob("*_caption.txt")} # Use a set for faster lookup
 
         # Find new caption files not in cache
         new_caption_ids = current_caption_files - set(self.image_captions.keys())
@@ -186,7 +194,7 @@ class FilterManager:
         for image_id in new_caption_ids:
             try:
                 # Read caption from file for new files
-                caption_file = IMAGES_DIR / f"{image_id}_caption.txt"
+                caption_file = CAPTIONS_DIRECTORY / f"{image_id}_caption.txt"
                 if caption_file.exists():
                      with open(caption_file, 'r') as f:
                          caption = f.read().strip()
