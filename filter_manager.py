@@ -52,16 +52,26 @@ class FilterManager:
     
     def get_image_filter_metadata(self, image_id: str):
         base_name = self.find_base_name(image_id)
+        print(f"Debug: Getting metadata for image {image_id}")
+        print(f"Debug: Base name found: {base_name}")
 
-        tags_for_image = self.get_tags_from_file_for_image(image_id)
+        # Get image-specific tags
+        image_tags = set(self.get_tags_from_file_for_image(image_id))
+        print(f"Debug: Image-specific tags: {image_tags}")
 
-        image_metadata =  self.metadata_cache['scene_metadata'].get(base_name, {
+        # Get scene metadata
+        image_metadata = self.metadata_cache['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
             'year': None
         })
+        print(f"Debug: Scene metadata: {image_metadata}")
 
-        image_metadata["tags"].extend(tags_for_image)
+        # Combine and deduplicate tags
+        scene_tags = set(image_metadata["tags"])
+        print(f"Debug: Scene tags: {scene_tags}")
+        image_metadata["tags"] = list(scene_tags | image_tags)
+        print(f"Debug: Combined tags: {image_metadata['tags']}")
         
         return image_metadata
     
@@ -69,13 +79,16 @@ class FilterManager:
         """Read and cache photoset metadata from JSON files."""
         # Read all JSON files in the metadata directory
         json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
+        print(f"Debug: Found {len(json_files)} photoset metadata files")
         
         for filename in json_files:
             filename_base = os.path.splitext(filename)[0]
             file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
+            print(f"Debug: Processing photoset file: {filename}")
             try:
                 with open(file_path, 'r') as f:
                     data = json.load(f)
+                    print(f"Debug: Loaded data from {filename}: {data}")
                     
                     # Initialize scene metadata
                     scene_metadata = {
@@ -108,8 +121,10 @@ class FilterManager:
                     # Add scene to scenes set and store its metadata
                     self.metadata_cache['scenes'].add(filename_base)
                     self.metadata_cache['scene_metadata'][filename_base] = scene_metadata
+                    print(f"Debug: Added scene metadata for {filename_base}: {scene_metadata}")
                                             
             except (json.JSONDecodeError, IOError) as e:
+                print(f"Debug: Error processing {filename}: {e}")
                 continue
     
     def find_base_name(self, image_id: str) -> str:
@@ -289,18 +304,22 @@ class FilterManager:
 
         return width, height
 
-    def get_tags_from_file_for_image(self, image_id: str) -> dict:
+    def get_tags_from_file_for_image(self, image_id: str) -> List[str]:
         """Get image-specific metadata from the metadata file.
         
         Args:
             image_id: The ID of the image to get metadata for
             
         Returns:
-            dict: A dictionary containing the image's metadata, or an empty dict if none exists
+            List[str]: A list of tags for the image, or an empty list if none exists
         """
-        return self.image_metadata.get(image_id, {}).get("tags", set())
+        print(f"Debug: Reading tags from file for image {image_id}")
+        print(f"Debug: Current image_metadata: {self.image_metadata}")
+        tags = self.image_metadata.get(image_id, {}).get("tags", [])
+        print(f"Debug: Found tags: {tags}")
+        return tags if isinstance(tags, list) else list(tags)
 
-    def set_tags_in_file_for_image(self, image_id: str, tags: List) -> None:
+    def set_tags_in_file_for_image(self, image_id: str, tags: List[str]) -> None:
         """Set image-specific metadata in the metadata file.
         
         Args:
@@ -311,33 +330,31 @@ class FilterManager:
         if image_id not in self.image_metadata:
             self.image_metadata[image_id] = {}
         
-        # Get current tags, ensuring it's a list
+        # Get current tags and ensure they're in a list
         current_tags = self.image_metadata[image_id].get("tags", [])
         if isinstance(current_tags, set):
             current_tags = list(current_tags)
         
-        # Add new tags
-        current_tags.extend(tags)
-
-        # Convert to tags
-        current_tags = set(current_tags)
+        # Add new tags and deduplicate
+        all_tags = set(current_tags + tags)
         
-        # Update metadata
-        self.image_metadata[image_id]["tags"] = list(current_tags)
+        # Update metadata with deduplicated list
+        self.image_metadata[image_id]["tags"] = list(all_tags)
         
         # Save back to file
         self.save_cache(self.image_metadata, self.IMAGE_METADATA_FILE)
 
-    def get_tags_for_image(self, image_id: str) -> dict:
+    def get_tags_for_image(self, image_id: str) -> List[str]:
         """Get combined metadata for an image, including both file-specific and scene metadata.
         
         Args:
             image_id: The ID of the image to get combined metadata for
             
         Returns:
-            dict: A dictionary containing the combined metadata
+            List[str]: A list of deduplicated tags for the image
         """
-        tags_for_image = self.get_tags_from_file_for_image(image_id)
+        # Get image-specific tags
+        image_tags = set(self.get_tags_from_file_for_image(image_id))
         
         # Get scene metadata
         base_name = self.find_base_name(image_id)
@@ -347,11 +364,8 @@ class FilterManager:
             'year': None
         })
         
-        # Combine the metadata and deduplicate tags
+        # Combine and deduplicate tags
         scene_tags = set(scene_metadata["tags"])
-        image_tags = set(tags_for_image) if isinstance(tags_for_image, list) else tags_for_image
-        
-        # Return deduplicated list of tags
         return list(scene_tags | image_tags)
 
     def save_all_caches(self):
