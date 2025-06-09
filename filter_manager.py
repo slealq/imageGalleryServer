@@ -37,19 +37,16 @@ class FilterManager:
         return image_files[0] if image_files else None
 
     def get_available_filters(self):
-
         # Get all image tags from image metadata
         all_per_image_tags = set()
 
         for image_id, metadata in self.image_metadata.items():
             if 'tags' in metadata:
-                for tag in metadata['tags']:
-                    file_tags = self.metadata_cache['tags'].get(tag, set())
-                    all_per_image_tags.extend(file_tags)
+                all_per_image_tags.update(metadata['tags'])
 
         return {
             "actors": sorted(self.metadata_cache['actors'].keys()),
-            "tags": sorted(self.metadata_cache['tags'].keys() + all_per_image_tags),
+            "tags": sorted(set(self.metadata_cache['tags'].keys()) | all_per_image_tags),
             "years": sorted(self.metadata_cache['year'].keys())
         }
     
@@ -65,6 +62,8 @@ class FilterManager:
         })
 
         image_metadata["tags"].extend(tags_for_image)
+        
+        return image_metadata
     
     def read_photoset_metadata(self):
         """Read and cache photoset metadata from JSON files."""
@@ -348,11 +347,12 @@ class FilterManager:
             'year': None
         })
         
-        # Combine the metadata - convert both to lists before concatenation
-        scene_tags = list(scene_metadata["tags"])
-        image_tags = list(tags_for_image) if isinstance(tags_for_image, set) else tags_for_image
+        # Combine the metadata and deduplicate tags
+        scene_tags = set(scene_metadata["tags"])
+        image_tags = set(tags_for_image) if isinstance(tags_for_image, list) else tags_for_image
         
-        return scene_tags + image_tags
+        # Return deduplicated list of tags
+        return list(scene_tags | image_tags)
 
     def save_all_caches(self):
         """Saves all caches to files."""
