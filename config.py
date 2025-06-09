@@ -10,6 +10,7 @@ class CaptionGeneratorType(Enum):
 IMAGES_DIR = Path("/mnt/d/TEST/images")
 CROPS_DIR = Path("/mnt/d/TEST/crops")
 PHOTOSET_METADATA_DIRECTORY = Path("/mnt/d/TEST/images_metadata")
+METADATA_DIRECTORY = Path("/mnt/d/TEST/metadata")
 IMAGES_PER_PAGE = 10
 
 # Server settings
