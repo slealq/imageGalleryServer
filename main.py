@@ -633,6 +633,27 @@ async def get_image_tags(image_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/images/{image_id}/custom-tags", response_model=TagResponse)
+async def get_image_custom_tags(image_id: str):
+    """
+    Get only the custom tags for an image (tags that were added specifically to this image)
+    """
+    try:
+        # Verify image exists
+        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Get only the custom tags for the image
+        tags = filter_manager.get_tags_from_file_for_image(image_id)
+        
+        return TagResponse(tags=tags)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/images/{image_id}/tags")
 async def add_image_tag(image_id: str, request: AddTagRequest):
     """

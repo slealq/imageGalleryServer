@@ -30,7 +30,7 @@ class FilterManager:
         self.cached_image_files: List[Path] = [] # Cache for the list of image file paths
         self.image_metadata: Dict[str, Dict] = {}
 
-    def get_image_path(image_id: str) -> Optional[Path]:
+    def get_image_path(self, image_id: str) -> Optional[Path]:
         """Get the full path of an image file by its ID."""
         # This function is correct as is
         image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
@@ -67,13 +67,21 @@ class FilterManager:
         })
         print(f"Debug: Scene metadata: {image_metadata}")
 
+        # Create a new copy of the metadata to avoid modifying the cache
+        new_metadata = {
+            'actors': image_metadata['actors'].copy(),
+            'tags': image_metadata['tags'].copy(),
+            'year': image_metadata['year']
+        }
+
         # Combine and deduplicate tags
-        scene_tags = set(image_metadata["tags"])
+        scene_tags = set(new_metadata["tags"])
         print(f"Debug: Scene tags: {scene_tags}")
-        image_metadata["tags"] = list(scene_tags | image_tags)
-        print(f"Debug: Combined tags: {image_metadata['tags']}")
+        all_tags = scene_tags.union(image_tags)
+        new_metadata["tags"] = list(all_tags)
+        print(f"Debug: Combined tags: {new_metadata['tags']}")
         
-        return image_metadata
+        return new_metadata
     
     def read_photoset_metadata(self):
         """Read and cache photoset metadata from JSON files."""
@@ -293,7 +301,7 @@ class FilterManager:
         
         # Fallback: If somehow not in cache (shouldn't happen after proper initialization), read from file and add to cache
         print(f"Warning: Image dimensions for {image_id} not in cache. Reading from file.")
-        image_path = get_image_path(image_id)
+        image_path = self.get_image_path(image_id)
         if not image_path:
             return None, None
         
@@ -353,20 +361,35 @@ class FilterManager:
         Returns:
             List[str]: A list of deduplicated tags for the image
         """
+        print(f"\nDebug: get_tags_for_image called for image_id: {image_id}")
+        
         # Get image-specific tags
+        print("Debug: Getting image-specific tags...")
         image_tags = set(self.get_tags_from_file_for_image(image_id))
+        print(f"Debug: Image-specific tags: {image_tags}")
         
         # Get scene metadata
+        print("Debug: Finding base name for scene metadata...")
         base_name = self.find_base_name(image_id)
+        print(f"Debug: Found base_name: {base_name}")
+        
         scene_metadata = self.metadata_cache['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
             'year': None
         })
+        print(f"Debug: Scene metadata: {scene_metadata}")
         
         # Combine and deduplicate tags
+        print("Debug: Combining and deduplicating tags...")
         scene_tags = set(scene_metadata["tags"])
-        return list(scene_tags | image_tags)
+        print(f"Debug: Scene tags: {scene_tags}")
+        
+        all_tags = scene_tags.union(image_tags)
+        combined_tags = list(all_tags)
+        print(f"Debug: Combined tags: {combined_tags}")
+        
+        return combined_tags
 
     def save_all_caches(self):
         """Saves all caches to files."""
