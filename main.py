@@ -84,9 +84,6 @@ class ImageCache:
         return self.locks[image_id]
     
     async def get(self, image_id: str) -> Optional[bytes]:
-        print(f"Getting image from cache {image_id}")
-        print(f"Cache size: {len(self.cache)} ")
-
         async with self._get_lock(image_id):
             if image_id in self.cache:
                 # Move to end (most recently used)
@@ -96,9 +93,6 @@ class ImageCache:
             return None
     
     async def put(self, image_id: str, image_data: bytes):
-        print(f"Putting image in cache {image_id}")
-        print(f"Cache size: {len(self.cache)} ")
-
         async with self._get_lock(image_id):
             # If key exists, remove it first to update size
             if image_id in self.cache:
@@ -206,6 +200,8 @@ class ImageMetadata(BaseModel):
     year: Optional[str] = None
     tags: List[str] = []
     actors: List[str] = []
+    has_custom_tags: bool = False
+    custom_tags: List[str] = []
 
 class ImageResponse(BaseModel):
     images: List[ImageMetadata]
@@ -263,6 +259,7 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
     width, height = filter_manager.image_dimensions.get(image_id, (None, None))
 
     image_filter_metadata = filter_manager.get_image_filter_metadata(image_id)
+    custom_tags = filter_manager.get_tags_from_file_for_image(image_id)
     
     return ImageMetadata(
         id=image_id,
@@ -278,7 +275,9 @@ def create_image_metadata(img_file: Path) -> ImageMetadata:
         has_crop=crop_cache.has_crop_metadata(image_id),
         year=image_filter_metadata['year'],
         tags=image_filter_metadata['tags'],
-        actors=image_filter_metadata['actors']
+        actors=image_filter_metadata['actors'],
+        has_custom_tags=len(custom_tags) > 0,
+        custom_tags=custom_tags
     )
 
 def calculate_pagination(
@@ -820,8 +819,6 @@ async def warmup_cache(
     Pre-warm the image cache for a specific page of images.
     Uses the same filtering logic as the images API but performs cache warming instead of returning results.
     """
-
-    print(f"Warmup cache for page {page}, page_size {page_size}, actor {actor}, tag {tag}, year {year}, has_caption {has_caption}, has_crop {has_crop}")
 
     start_time = time.time()
     

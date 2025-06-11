@@ -52,12 +52,9 @@ class FilterManager:
     
     def get_image_filter_metadata(self, image_id: str):
         base_name = self.find_base_name(image_id)
-        print(f"Debug: Getting metadata for image {image_id}")
-        print(f"Debug: Base name found: {base_name}")
 
         # Get image-specific tags
         image_tags = set(self.get_tags_from_file_for_image(image_id))
-        print(f"Debug: Image-specific tags: {image_tags}")
 
         # Get scene metadata
         image_metadata = self.metadata_cache['scene_metadata'].get(base_name, {
@@ -65,7 +62,6 @@ class FilterManager:
             'tags': [],
             'year': None
         })
-        print(f"Debug: Scene metadata: {image_metadata}")
 
         # Create a new copy of the metadata to avoid modifying the cache
         new_metadata = {
@@ -76,10 +72,8 @@ class FilterManager:
 
         # Combine and deduplicate tags
         scene_tags = set(new_metadata["tags"])
-        print(f"Debug: Scene tags: {scene_tags}")
         all_tags = scene_tags.union(image_tags)
         new_metadata["tags"] = list(all_tags)
-        print(f"Debug: Combined tags: {new_metadata['tags']}")
         
         return new_metadata
     
@@ -87,16 +81,13 @@ class FilterManager:
         """Read and cache photoset metadata from JSON files."""
         # Read all JSON files in the metadata directory
         json_files = [f for f in os.listdir(PHOTOSET_METADATA_DIRECTORY) if f.endswith('.json')]
-        print(f"Debug: Found {len(json_files)} photoset metadata files")
         
         for filename in json_files:
             filename_base = os.path.splitext(filename)[0]
             file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
-            print(f"Debug: Processing photoset file: {filename}")
             try:
                 with open(file_path, 'r') as f:
                     data = json.load(f)
-                    print(f"Debug: Loaded data from {filename}: {data}")
                     
                     # Initialize scene metadata
                     scene_metadata = {
@@ -129,10 +120,8 @@ class FilterManager:
                     # Add scene to scenes set and store its metadata
                     self.metadata_cache['scenes'].add(filename_base)
                     self.metadata_cache['scene_metadata'][filename_base] = scene_metadata
-                    print(f"Debug: Added scene metadata for {filename_base}: {scene_metadata}")
                                             
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Debug: Error processing {filename}: {e}")
                 continue
     
     def find_base_name(self, image_id: str) -> str:
@@ -321,10 +310,7 @@ class FilterManager:
         Returns:
             List[str]: A list of tags for the image, or an empty list if none exists
         """
-        print(f"Debug: Reading tags from file for image {image_id}")
-        print(f"Debug: Current image_metadata: {self.image_metadata}")
         tags = self.image_metadata.get(image_id, {}).get("tags", [])
-        print(f"Debug: Found tags: {tags}")
         return tags if isinstance(tags, list) else list(tags)
 
     def set_tags_in_file_for_image(self, image_id: str, tags: List[str]) -> None:
@@ -361,33 +347,24 @@ class FilterManager:
         Returns:
             List[str]: A list of deduplicated tags for the image
         """
-        print(f"\nDebug: get_tags_for_image called for image_id: {image_id}")
         
         # Get image-specific tags
-        print("Debug: Getting image-specific tags...")
         image_tags = set(self.get_tags_from_file_for_image(image_id))
-        print(f"Debug: Image-specific tags: {image_tags}")
         
         # Get scene metadata
-        print("Debug: Finding base name for scene metadata...")
         base_name = self.find_base_name(image_id)
-        print(f"Debug: Found base_name: {base_name}")
         
         scene_metadata = self.metadata_cache['scene_metadata'].get(base_name, {
             'actors': [],
             'tags': [],
             'year': None
         })
-        print(f"Debug: Scene metadata: {scene_metadata}")
         
         # Combine and deduplicate tags
-        print("Debug: Combining and deduplicating tags...")
         scene_tags = set(scene_metadata["tags"])
-        print(f"Debug: Scene tags: {scene_tags}")
         
         all_tags = scene_tags.union(image_tags)
         combined_tags = list(all_tags)
-        print(f"Debug: Combined tags: {combined_tags}")
         
         return combined_tags
 
