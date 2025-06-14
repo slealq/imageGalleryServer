@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from filter_manager import filter_manager
 from functools import partial
 from io import BytesIO
+from models.models import ImageMetadata, ImageResponse, CaptionRequest, CaptionResponse, TagResponse, AddTagRequest, ExportRequest
 from pathlib import Path
 from PIL import Image as PILImage
 from pydantic import BaseModel
@@ -184,47 +185,7 @@ def get_image_path(image_id: str) -> Optional[Path]:
     image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
     return image_files[0] if image_files else None
 
-# Models
-class ImageMetadata(BaseModel):
-    id: str
-    filename: str
-    size: int
-    created_at: datetime
-    mime_type: str
-    width: Optional[int] = None
-    height: Optional[int] = None
-    has_caption: bool = False
-    collection_name: str = "Default Collection"
-    has_tags: bool = False
-    has_crop: bool = False
-    year: Optional[str] = None
-    tags: List[str] = []
-    actors: List[str] = []
-    has_custom_tags: bool = False
-    custom_tags: List[str] = []
-
-class ImageResponse(BaseModel):
-    images: List[ImageMetadata]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
-
-class CaptionRequest(BaseModel):
-    prompt: Optional[str] = None
-    caption: Optional[str] = None
-
-class CaptionResponse(BaseModel):
-    caption: str
-
-class TagResponse(BaseModel):
-    tags: List[str]
-
-class AddTagRequest(BaseModel):
-    tag: str
-
-class ExportRequest(BaseModel):
-    imageIds: List[str]
+# Models are now defined in models/models.py
 
 @app.get("/filters", response_model=Dict[str, List[str]])
 async def get_available_filters():
