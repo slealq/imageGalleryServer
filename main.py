@@ -3,6 +3,7 @@ from caption_generator import get_caption_generator
 from collections import OrderedDict
 from config import IMAGES_DIR, IMAGES_PER_PAGE, SERVER_HOST, SERVER_PORT, PROFILING_ENABLED, PROFILING_DIR, PHOTOSET_METADATA_DIRECTORY # Import profiling config
 from controllers.CropController import router as crop_router
+from controllers.TagController import router as tag_router
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,6 +67,7 @@ app.add_middleware(RequestTimingMiddleware)
 
 # Include routers
 app.include_router(crop_router)
+app.include_router(tag_router)
 
 # Initialize caption generator
 caption_generator = get_caption_generator()
@@ -184,8 +186,6 @@ def get_image_path(image_id: str) -> Optional[Path]:
     # This function is correct as is
     image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
     return image_files[0] if image_files else None
-
-# Models are now defined in models/models.py
 
 @app.get("/filters", response_model=Dict[str, List[str]])
 async def get_available_filters():
@@ -566,69 +566,6 @@ async def get_caption(image_id: str):
             raise HTTPException(status_code=404, detail="No caption found for this image")
         
         return CaptionResponse(caption=caption)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/images/{image_id}/tags", response_model=TagResponse)
-async def get_image_tags(image_id: str):
-    """
-    Get all tags for an image (both scene and image-specific tags)
-    """
-    try:
-        # Verify image exists
-        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-        if not image_files:
-            raise HTTPException(status_code=404, detail="Image not found")
-        
-        # Get all tags for the image
-        tags = filter_manager.get_tags_for_image(image_id)
-        
-        return TagResponse(tags=tags)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/images/{image_id}/custom-tags", response_model=TagResponse)
-async def get_image_custom_tags(image_id: str):
-    """
-    Get only the custom tags for an image (tags that were added specifically to this image)
-    """
-    try:
-        # Verify image exists
-        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-        if not image_files:
-            raise HTTPException(status_code=404, detail="Image not found")
-        
-        # Get only the custom tags for the image
-        tags = filter_manager.get_tags_from_file_for_image(image_id)
-        
-        return TagResponse(tags=tags)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/images/{image_id}/tags")
-async def add_image_tag(image_id: str, request: AddTagRequest):
-    """
-    Add a tag to an image
-    """
-    try:
-        # Verify image exists
-        image_files = list(IMAGES_DIR.glob(f"{image_id}.*"))
-        if not image_files:
-            raise HTTPException(status_code=404, detail="Image not found")
-        
-        # Add the tag
-        filter_manager.set_tags_in_file_for_image(image_id, [request.tag])
-        
-        return {"message": f"Tag '{request.tag}' added successfully"}
     
     except HTTPException:
         raise
