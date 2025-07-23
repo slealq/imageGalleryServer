@@ -1,0 +1,21 @@
+# Test Configuration for Detectron2 Pose Extraction
+# Demonstrates the new Detectron2 + Keypoint R-CNN method
+
+# Required Fields
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Use Detectron2 for pose extraction
+pose_method: "detectron2"
+
+# Detectron2 Settings
+detectron2_model: "COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"
+detectron2_confidence_threshold: 0.5
+
+# General Settings
+confidence_threshold: 0.5
+use_gpu: true
+save_pose_images: true
+
+# Testing with small sample
+sample_percentage: 1 

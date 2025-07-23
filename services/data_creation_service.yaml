@@ -1,0 +1,16 @@
+dataset_path: /mnt/d/TEST/images
+# force_include:
+# - /mnt/d/TEST/images/JillKassidy_JakeAdams__February_1_2019_4800_1074_lhf_0159.jpg
+# - /mnt/d/TEST/images/JillKassidy_StirlingCooper__March_26_2021_4800_1221_lhf_170.jpg
+# - /mnt/d/TEST/images/ChloeTemple_MilanPonjevic__September_24_2022_4800_1368_157.jpg
+# - /mnt/d/TEST/images/MaddyBlack_DeanVanDamme__December_6_2023_4800_1399_148.jpg
+# - /mnt/d/TEST/images/LexiLuna_LucasFrost__November_13_2020_4800_1181_lhf_0149.jpg
+# - /mnt/d/TEST/images/CharlySummer_CodyCarter__August_13_2022_4800_1293_120.jpg
+# - /mnt/d/TEST/images/MaddyMay_JakeAdams__May_29_2021_4800_1235_lhf_170.jpg
+# - /mnt/d/TEST/images/BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_099.jpg
+# - /mnt/d/TEST/images/MarleyBrinx_JakeAdams__June_14_2019_4800_1097_lhf_0122.jpg
+# - /mnt/d/TEST/images/SilviaSaige_LoganPierce__March_8_2019_4800_1082_lhf_0125.jpg
+# - /mnt/d/TEST/images/VanessaCage_JakeAdams__October_18_2019_4800_1114_lhf_0159.jpg
+fraction: 1
+output_path: /mnt/d/TEST/similarity_engine_results
+random_seed: 10209457834

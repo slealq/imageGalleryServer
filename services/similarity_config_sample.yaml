@@ -1,0 +1,205 @@
+# Sample Configuration for Similarity Service
+# This file demonstrates how to configure the similarity search service
+
+# Required Fields
+# ---------------
+
+# Path to pre-computed embeddings from the embedding service
+# Should be a .npz file containing 'embeddings' and 'image_paths' arrays
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250718_192810_1133879f/embeddings.npz"
+
+# List of target images to find similar images for
+# Can be a single string or list of strings
+# For multiple targets, the service will find images similar to any/all of them
+target_images:
+- "/mnt/d/TEST/images/KylerQuinn_ChadWhite__December_13_2019_4800_1122 lhf_0165.jpg"
+- /mnt/d/TEST/images/AdrianaChechik_BradNewman__May_24_2019_4800_1099_lhf_0138.jpg
+- /mnt/d/TEST/images/AdrianaChechik_BradNewman__May_24_2019_4800_1099_lhf_0140.jpg
+- /mnt/d/TEST/images/AlexiaAnders_JakeAdams__February_26_2021_4800_1220_lhf_169.jpg
+- /mnt/d/TEST/images/BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_099.jpg
+- /mnt/d/TEST/images/BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_100.jpg
+- /mnt/d/TEST/images/BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_101.jpg
+- /mnt/d/TEST/images/BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_106.jpg
+- /mnt/d/TEST/images/CatalinaOssa_JakeAdams__August_7_2021_4800_1248_lhf_135.jpg
+- /mnt/d/TEST/images/CharlySummer_CodyCarter__August_13_2022_4800_1293_120.jpg
+- /mnt/d/TEST/images/ChloeTemple_MilanPonjevic__September_24_2022_4800_1368_157.jpg
+- /mnt/d/TEST/images/ElizaIbarra_BillBailey__August_17_2018_1600_lhf_1054_0306.jpg
+- /mnt/d/TEST/images/FreyaParker_AlexJones__April_15_2023_4800_1420_111.jpg
+- /mnt/d/TEST/images/IsabellaDeLaa_Lutro__May_17_2023_4800_1423_088.jpg
+- /mnt/d/TEST/images/JayeSummers_BillBailey__April_20_2018_1600_lhf 1036-0191.jpg
+- /mnt/d/TEST/images/JennyWild_StanleyJohnson__September_8_2021_4800_1250_lhf_149.jpg
+- /mnt/d/TEST/images/JessicaStarling_DonteThick__August_6_2022_4800_1348_118.jpg # doesnt'cum
+- /mnt/d/TEST/images/JessicaStarling_DonteThick__August_6_2022_4800_1348_122.jpg
+- /mnt/d/TEST/images/JillKassidy_JakeAdams__February_1_2019_4800_1074_lhf_0157.jpg
+- /mnt/d/TEST/images/JillKassidy_JakeAdams__February_1_2019_4800_1074_lhf_0159.jpg
+- /mnt/d/TEST/images/JillKassidy_StirlingCooper__March_26_2021_4800_1221_lhf_169.jpg
+- /mnt/d/TEST/images/JillKassidy_StirlingCooper__March_26_2021_4800_1221_lhf_170.jpg
+- /mnt/d/TEST/images/JillKassidy_StirlingCooper__March_26_2021_4800_1221_lhf_172.jpg
+- /mnt/d/TEST/images/JillKassidy_StirlingCooper__March_26_2021_4800_1221_lhf_173.jpg
+- /mnt/d/TEST/images/KatrinaJade_BillBailey__August_31_2018_1600_lhf_1055_0146.jpg
+- /mnt/d/TEST/images/KaylaKayden_LucasFrost__October_16_2020_4800_1196_lhf_0146.jpg
+- /mnt/d/TEST/images/KristenScott_BillBailey__May_4_2018_1600_dsc_0276.jpg
+- /mnt/d/TEST/images/LaneyGrey_CodyCarter__March_26_2022_4800_1294_126.jpg
+- /mnt/d/TEST/images/LexiLuna_LucasFrost__November_13_2020_4800_1181_lhf_0149.jpg
+- /mnt/d/TEST/images/LiaLin_DeanVanDamme__March_22_2023_4800_1412_168.jpg
+- /mnt/d/TEST/images/LilyAdams_JakeAdams__January_26_2018_1600_dsc_0202.jpg
+- /mnt/d/TEST/images/LiyaSilver_VinceKarter__November_17_2021_4800_1263_lhf_150.jpg
+- /mnt/d/TEST/images/LolaFae_BillBailey__March_29_2019_4800_1083_lhf_0140.jpg
+- /mnt/d/TEST/images/LolaFae_BillBailey__March_29_2019_4800_1083_lhf_0141.jpg
+- /mnt/d/TEST/images/LolaFae_BillBailey__March_29_2019_4800_1083_lhf_0142.jpg
+- /mnt/d/TEST/images/MaddyBlack_DeanVanDamme__December_6_2023_4800_1399_148.jpg
+- /mnt/d/TEST/images/MaddyBlack_DeanVanDamme__December_6_2023_4800_1399_149.jpg
+- /mnt/d/TEST/images/MaddyMay_JakeAdams__May_29_2021_4800_1235_lhf_169.jpg
+- /mnt/d/TEST/images/MaddyMay_JakeAdams__May_29_2021_4800_1235_lhf_170.jpg
+- /mnt/d/TEST/images/MarleyBrinx_JakeAdams__June_14_2019_4800_1097_lhf_0121.jpg
+- /mnt/d/TEST/images/MarleyBrinx_JakeAdams__June_14_2019_4800_1097_lhf_0122.jpg
+- /mnt/d/TEST/images/MillieMorgan_LucasFrost__June_3_2023_4800_1437_146.jpg
+- /mnt/d/TEST/images/MillieMorgan_LucasFrost__June_3_2023_4800_1437_147.jpg
+- /mnt/d/TEST/images/MillieMorgan_LucasFrost__June_3_2023_4800_1437_149.jpg
+- /mnt/d/TEST/images/MollyLittle_JayRomero__August_19_2023_4800_1461_105.jpg
+- /mnt/d/TEST/images/MollyLittle_JayRomero__August_19_2023_4800_1461_107.jpg
+- /mnt/d/TEST/images/MollyLittle_JayRomero__August_19_2023_4800_1461_109.jpg
+- /mnt/d/TEST/images/OctaviaRed_CodyCarter__April_16_2022_4800_1313_149.jpg
+- /mnt/d/TEST/images/PiperPerri_BillBailey__January_19_2018_1600_dsc_0201.jpg
+- /mnt/d/TEST/images/SashaRose_ErikEverhard__November_22_2023_4800_1337_118.jpg
+- /mnt/d/TEST/images/ScarlettAlexis_LucasFrost__January_7_2023_4800_1402_101.jpg
+- /mnt/d/TEST/images/SilviaSaige_LoganPierce__March_8_2019_4800_1082_lhf_0125.jpg
+- /mnt/d/TEST/images/SimonKitty_Renato__February_28_2024_4800_1501_097.jpg
+- /mnt/d/TEST/images/ValericaSteele_CodyCarter__June_24_2023_4800_1452_131.jpg
+- /mnt/d/TEST/images/VanessaCage_JakeAdams__October_18_2019_4800_1114_lhf_0158.jpg
+- /mnt/d/TEST/images/VanessaCage_JakeAdams__October_18_2019_4800_1114_lhf_0159.jpg
+- /mnt/d/TEST/images/VanessaSky_JessyJones__November_22_2019_4800_1118_lhf_0152.jpg
+- /mnt/d/TEST/images/VioletStarr_JakeAdams_JayRomero__July_31_2021_4800_1234_lhf_165.jpg
+- /mnt/d/TEST/images/VioletStarr_JakeAdams_JayRomero__July_31_2021_4800_1234_lhf_166.jpg
+
+# SeraRyder JakeAdamas June 19 129
+# AlexiaAnders_JakeAdamas
+# MillieMorgan
+
+# rank_105_score_1.0262_BlakeBlossom_JayRomero__May_15_2021_4800_1241_lhf_091.jpg
+# rank_284_score_0.5194_JillKassidy_MilanPonjevic__November_11_2023_4800_1457_044.jpg
+
+  # - "/path/to/target/image1.jpg"
+  # - "/path/to/target/image2.jpg"  # Uncomment for multiple target images
+
+# Output directory where results will be saved
+# Results will be organized in: output_path/results/similarity/{run_id}/
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Optional Fields (with defaults)
+# --------------------------------
+
+# FAISS index type for similarity search (default: 'IndexFlatIP')
+# Options: 'IndexFlatIP' (cosine sim), 'IndexFlatL2' (euclidean), 'IndexIVFFlat', 'IndexHNSW'
+faiss_index_type: "IndexFlatIP"
+
+# Number of top similar images to return (default: 30)
+top_k: 1000
+
+# Whether to include target images in results (default: false)
+include_target_in_results: false
+
+# Whether to normalize embeddings (default: true)
+normalize_embeddings: true
+
+# Whether to copy similar images to output directory (default: true)
+copy_images: true
+
+# Multi-Target Search Strategy Options (NEW!)
+# ===========================================
+
+# Enable improved multi-target search (default: true)
+# When true and multiple targets provided, searches for each target individually
+# and combines results for better semantic coverage
+use_multi_target_search: false
+
+# Strategy for combining multi-target results (default: 'weighted_union')
+# Options:
+#   'weighted_union' - Combines scores from all targets, images found by multiple targets get higher scores
+#   'intersection'   - Prioritizes images found by multiple targets
+#   'rank_fusion'    - Uses reciprocal rank fusion to combine rankings
+multi_target_strategy: "weighted_union"
+
+# Number of results to get per individual target before combining (default: 50)
+# Higher values give more diverse results but take more time
+individual_search_k: 50
+
+# Weight decay for multiple targets (default: 0.9)
+# First target gets weight 1.0, second gets 0.9, third gets 0.81, etc.
+# Lower values make later targets less influential
+target_weight_decay: 0.9
+
+# Example configurations for different use cases:
+# 
+# For single target (traditional approach):
+# use_multi_target_search: false
+# 
+# For diverse results across multiple targets:
+# multi_target_strategy: "weighted_union"
+# individual_search_k: 100
+# target_weight_decay: 0.8
+# 
+# For images similar to ALL targets:
+# multi_target_strategy: "intersection"
+# individual_search_k: 30
+# 
+# For balanced ranking combination:
+# multi_target_strategy: "rank_fusion"
+# individual_search_k: 50
+
+# Pose-Aware Similarity Options (NEW!)
+# ====================================
+
+# Enable pose-aware similarity (default: false)
+# When true, combines both embedding similarity and pose similarity
+use_pose_similarity: false
+
+# Path to pose extraction results (required if use_pose_similarity is true)
+# Can be either a directory (containing pose_data.json) or direct path to pose_data.json
+pose_data_path: "/path/to/pose_extraction_results/run_id/"
+
+# Weight for pose similarity in combined score (default: 0.3)
+# Higher values prioritize pose similarity over embedding similarity
+pose_weight: 0.3
+
+# Weight for embedding similarity in combined score (default: 0.7)
+# pose_weight + embedding_weight should equal 1.0
+embedding_weight: 0.7
+
+# Method for computing pose similarity (default: 'euclidean')
+# Options: 'euclidean', 'cosine'
+pose_similarity_method: "euclidean"
+
+# Minimum confidence threshold for pose matching (default: 0.2)
+# Only poses with confidence >= this value will be used for similarity
+pose_confidence_threshold: 0.2
+
+# Example configurations for pose-aware similarity:
+#
+# Balanced embedding + pose similarity:
+# use_pose_similarity: true
+# pose_weight: 0.4
+# embedding_weight: 0.6
+#
+# Pose-focused similarity:
+# use_pose_similarity: true
+# pose_weight: 0.7
+# embedding_weight: 0.3
+# pose_confidence_threshold: 0.3
+#
+# Conservative pose matching (high confidence poses only):
+# use_pose_similarity: true
+# pose_confidence_threshold: 0.5
+# pose_similarity_method: "cosine"
+
+# Performance Options
+# ===================
+
+# For large datasets with GPU:
+# faiss_index_type: "IndexIVFFlat"  # Faster for >100k images
+# 
+# For maximum accuracy:
+# faiss_index_type: "IndexFlatIP"   # Exact search
+# 
+# For fast approximate search:
+# faiss_index_type: "IndexHNSW"     # Good balance of speed/accuracy 

@@ -1,0 +1,62 @@
+# Sample configuration for the Embedding Service
+# This service generates image embeddings using CLIP models
+
+# Required Fields
+# ---------------
+
+# Path to the dataset directory containing images
+# The service will recursively search for supported image formats
+dataset_path: "/mnt/d/TEST/similarity_engine_results/results/dataset/20250721_102744_9434f341"
+
+# CLIP model name to use for embedding generation
+# Common options: ViT-B-32, ViT-B-16, ViT-L-14, RN50, RN101
+# If the specified model fails to load, it will fallback to ViT-B-32
+model_name: "ViT-L-14"
+
+# Output directory where results will be saved
+# Results will be organized in: output_path/results/embeddings/{run_id}/
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Optional Fields (with defaults)
+# --------------------------------
+
+# Batch size for processing images (default: 32)
+# Larger values use more memory but may be faster
+# Reduce if you encounter out-of-memory errors
+batch_size: 32
+device: "auto"  # Options: "auto", "cuda", "cpu"
+target_size: 224
+
+# Pretrained weights to use
+# Options include:
+# - "openai": Original OpenAI CLIP weights (will automatically use QuickGELU variants)
+# - "laion2b_s34b_b79k": LAION-2B trained weights
+# - "laion400m_e32": LAION-400M trained weights
+# - And many others from OpenCLIP
+pretrained: "openai"
+
+# Target size for image preprocessing (default: 224)
+# Images will be resized to this size while preserving aspect ratio
+# Most CLIP models work best with 224x224
+target_size: 224
+
+# Example configurations for different use cases:
+# 
+# For large datasets with GPU:
+# batch_size: 64
+# device: "cuda"
+# 
+# For small datasets or CPU-only:
+# batch_size: 16
+# device: "cpu"
+# 
+# For high-resolution processing:
+# target_size: 336
+# batch_size: 16  # Reduce batch size for larger images
+#
+# Notes:
+# - For OpenAI pretrained weights, the service will automatically try QuickGELU variants
+#   to avoid activation mismatch warnings
+# - The model_name can be one of: ViT-B-32, ViT-B-16, ViT-L-14, RN50, RN101, etc.
+# - If using custom model names, ensure they are supported by the open_clip library
+# - The service will fallback to ViT-B-32 if the specified model fails to load 

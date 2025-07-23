@@ -1,0 +1,224 @@
+# Enhanced Image Clustering Service Configuration
+# Clusters images using FAISS similarity combined with pose and embedding features
+# Generates cluster examples with pose estimation overlays
+
+# Required Fields
+# ---------------
+
+# Path to pre-computed embeddings from the embedding service
+# Should be a .npz file containing 'embeddings' and 'image_paths' arrays
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+
+# Path to pose data from pose extraction service
+# Can be directory containing pose_data.json or direct path to pose_data.json
+pose_data_path: "/mnt/d/TEST/similarity_engine_results/results/pose_extraction/20250721_191733_6ebd5acb/pose_data.json"
+
+# Output directory where results will be saved
+# Results will be organized in: output_path/results/clustering/{run_id}/
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Clustering Configuration
+# ========================
+
+# Clustering method (default: 'faiss_similarity')
+# Options:
+# - 'faiss_similarity': FAISS-based similarity clustering (recommended)
+# - 'kmeans': Traditional K-means clustering
+# - 'hdbscan': Hierarchical density-based clustering
+# - 'dbscan': Density-based clustering
+clustering_method: "faiss_similarity"
+
+# Feature type for clustering (default: 'combined')
+# Options:
+# - 'combined': Use both pose and embedding features (recommended)
+# - 'embedding': Use only embedding features
+# - 'pose': Use only pose features
+feature_type: "combined"
+
+# FAISS Similarity Clustering Settings
+# ====================================
+
+# FAISS index type (default: 'IndexFlatIP')
+# Options:
+# - 'IndexFlatIP': Inner Product (cosine similarity for normalized vectors) - most accurate
+# - 'IndexFlatL2': L2 distance (Euclidean) - good for pose features
+# - 'IndexIVFFlat': Faster for large datasets (requires training)
+# - 'IndexHNSW': Hierarchical NSW for fast approximate search
+faiss_index_type: "IndexFlatIP"
+
+# Minimum similarity threshold for clustering (default: 0.7)
+# Higher values = more strict clustering (fewer, more similar clusters)
+# Lower values = more lenient clustering (more, less similar clusters)
+# Range: 0.0 to 1.0
+similarity_threshold: 0.55
+
+# Maximum number of similar images to consider per seed (default: 100)
+# Higher values = more thorough but slower clustering
+# Lower values = faster but may miss some similar images
+max_cluster_search_depth: 150
+
+# Use iterative clustering approach (default: true)
+# true = faster, processes images in batches
+# false = more thorough, considers all pairwise similarities
+use_iterative_clustering: true
+
+# Feature Combination Settings (for 'combined' feature_type)
+# ==========================================================
+
+# Weight for pose features in combined features (default: 0.5)
+# Higher values = pose similarity is more important
+# Range: 0.0 to 1.0 (should sum to 1.0 with embedding_weight)
+pose_weight: 0.7
+
+# Weight for embedding features in combined features (default: 0.5)
+# Higher values = visual/semantic similarity is more important
+# Range: 0.0 to 1.0 (should sum to 1.0 with pose_weight)
+embedding_weight: 0.3
+
+# Quality and Output Settings
+# ===========================
+
+# Minimum confidence threshold for pose data (default: 0.2)
+# Poses with confidence below this threshold will be filtered out
+pose_confidence_threshold: 0.3
+
+# Minimum cluster size (default: 5)
+# Clusters smaller than this will be marked as noise
+min_cluster_size: 8
+
+# Maximum number of example images per cluster (default: 50)
+# Higher values = more examples but larger output
+max_examples_per_cluster: 30
+
+# Whether to copy cluster examples to output directory (default: true)
+copy_examples: true
+
+# Whether to generate pose overlays for cluster examples (default: true)
+# Creates images with pose keypoints and skeleton overlaid
+generate_pose_overlays: false
+
+# Whether to generate cluster collages (default: true)
+# Creates a single image showing all examples from each cluster in a grid layout
+# Makes it easy to quickly review cluster quality without opening individual folders
+generate_cluster_collages: true
+
+# Whether to generate clustering visualizations (default: true)
+# Creates charts and plots showing cluster statistics
+generate_visualizations: true
+
+# Advanced Settings (Optional)
+# =============================
+
+# For K-means clustering (only used when clustering_method: 'kmeans')
+n_clusters: "auto"  # number or 'auto'
+kmeans_max_iter: 300
+kmeans_random_state: 42
+
+# For HDBSCAN clustering (only used when clustering_method: 'hdbscan')
+hdbscan_min_cluster_size: 10
+hdbscan_min_samples: 5
+
+# For DBSCAN clustering (only used when clustering_method: 'dbscan')
+dbscan_eps: 0.5
+dbscan_min_samples: 5
+
+# Distance metric for traditional clustering methods (default: 'euclidean')
+distance_metric: "euclidean"
+
+# Example Configurations for Different Use Cases
+# ==============================================
+
+# Configuration 1: High-precision pose clustering
+# ------------------------------------------------
+# clustering_method: "faiss_similarity"
+# feature_type: "combined"
+# pose_weight: 0.7
+# embedding_weight: 0.3
+# similarity_threshold: 0.8
+# min_cluster_size: 10
+# pose_confidence_threshold: 0.5
+
+# Configuration 2: Visual similarity focused
+# -------------------------------------------
+# clustering_method: "faiss_similarity"
+# feature_type: "combined"
+# pose_weight: 0.2
+# embedding_weight: 0.8
+# similarity_threshold: 0.7
+# faiss_index_type: "IndexFlatIP"
+
+# Configuration 3: Pure pose clustering
+# --------------------------------------
+# clustering_method: "faiss_similarity"
+# feature_type: "pose"
+# similarity_threshold: 0.6
+# faiss_index_type: "IndexFlatL2"
+# pose_confidence_threshold: 0.4
+
+# Configuration 4: Large dataset (fast processing)
+# ------------------------------------------------
+# clustering_method: "faiss_similarity"
+# faiss_index_type: "IndexHNSW"
+# similarity_threshold: 0.65
+# max_cluster_search_depth: 50
+# max_examples_per_cluster: 20
+# generate_pose_overlays: false
+# generate_cluster_collages: false
+
+# Configuration 5: Small dataset (maximum quality)
+# ------------------------------------------------
+# clustering_method: "faiss_similarity"
+# faiss_index_type: "IndexFlatIP"
+# similarity_threshold: 0.8
+# max_cluster_search_depth: 200
+# use_iterative_clustering: false
+# pose_confidence_threshold: 0.5
+# min_cluster_size: 3
+
+# Performance Notes
+# =================
+#
+# FAISS Index Types:
+# - IndexFlatIP: Most accurate, good for up to 100K images
+# - IndexFlatL2: Good for pose-heavy features, accurate
+# - IndexIVFFlat: Faster for 100K+ images, slight accuracy loss
+# - IndexHNSW: Fastest for 1M+ images, approximate results
+#
+# Similarity Thresholds:
+# - 0.9+: Very strict, only nearly identical poses/images
+# - 0.8-0.9: Strict, similar poses with minor variations
+# - 0.7-0.8: Moderate, good balance of similarity and diversity
+# - 0.6-0.7: Lenient, broader pose categories
+# - <0.6: Very lenient, may group dissimilar images
+#
+# Feature Type Guidelines:
+# - 'combined': Best overall results, balances pose and visual similarity
+# - 'pose': Good for clustering by body position/pose type
+# - 'embedding': Good for clustering by visual/semantic content
+#
+# Performance vs Quality:
+# - For speed: use_iterative_clustering=true, max_cluster_search_depth=50-100
+# - For quality: use_iterative_clustering=false, max_cluster_search_depth=200+
+# - For large datasets: IndexHNSW, similarity_threshold=0.65-0.7
+# - For small datasets: IndexFlatIP, similarity_threshold=0.75-0.85
+#
+# Output Features:
+# - generate_pose_overlays=true: Creates visual pose overlays (slower)
+# - generate_cluster_collages=true: Creates collage images showing all cluster examples
+# - copy_examples=true: Copies images to organized cluster folders
+# - generate_visualizations=true: Creates analysis charts and plots
+#
+# Expected Results:
+# - Clusters organized by pose similarity and visual content
+# - Each cluster contains images with similar poses/content
+# - Cluster collages provide quick visual overview of each cluster
+# - Pose overlays show detected keypoints and skeleton
+# - Visualizations show cluster statistics and distributions
+#
+# Tips for Best Results:
+# 1. Use 'combined' feature_type for balanced clustering
+# 2. Adjust pose_weight/embedding_weight based on your priority
+# 3. Start with similarity_threshold=0.75 and adjust based on results
+# 4. Use higher pose_confidence_threshold (0.3-0.5) for better quality
+# 5. Set min_cluster_size based on your dataset size (5-15)
+# 6. Enable pose_overlays to visually verify cluster quality 

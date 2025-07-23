@@ -1,0 +1,188 @@
+# MediaPipe Pose Extraction Configuration
+# Simple and fast pose extraction using Google's MediaPipe
+
+# Required Fields
+# ---------------
+
+# Path to pre-computed embeddings from the embedding service
+# Should be a .npz file containing 'embeddings' and 'image_paths' arrays
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+
+# Output directory where results will be saved
+# Results will be organized in: output_path/results/pose_extraction/{run_id}/
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Optional Fields (with defaults)
+# --------------------------------
+
+# Pose extraction method (default: 'mediapipe')
+# Options: 'mediapipe' or 'detectron2'
+# - mediapipe: Google's MediaPipe (fast, good for single person)
+# - detectron2: Facebook's Detectron2 + Keypoint R-CNN (excellent for multiple people)
+pose_method: "detectron2"
+
+# Minimum confidence threshold for pose detection (default: 0.5)
+# Poses with confidence below this threshold will be filtered out
+confidence_threshold: 0.5
+
+# Detection confidence for MediaPipe (default: 0.5)
+# Higher values = more strict detection
+detection_confidence: 0.5
+
+# Tracking confidence for MediaPipe (default: 0.5)
+# Used for video processing (not relevant for static images)
+tracking_confidence: 0.5
+
+# Whether to use GPU acceleration (default: true)
+# MediaPipe automatically uses GPU when available
+use_gpu: true
+
+# Whether to save pose visualization images (default: true)
+# Creates overlay images showing detected keypoints and skeleton
+save_pose_images: true
+
+# MediaPipe Settings (only used when pose_method: 'mediapipe')
+# ================================================================
+
+# Model complexity (default: 1)
+# 0 = lite (fastest, least accurate)
+# 1 = full (balanced speed/accuracy) 
+# 2 = heavy (slowest, most accurate)
+model_complexity: 2
+
+# Detectron2 Settings (only used when pose_method: 'detectron2')
+# ===============================================================
+
+# Detectron2 model to use (default: keypoint_rcnn_R_50_FPN_3x)
+# Available models:
+# - COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml (recommended)
+# - COCO-Keypoints/keypoint_rcnn_R_101_FPN_3x.yaml (more accurate, slower)
+# - COCO-Keypoints/keypoint_rcnn_X_101_32x8d_FPN_3x.yaml (most accurate, slowest)
+detectron2_model: "COCO-Keypoints/keypoint_rcnn_X_101_32x8d_FPN_3x.yaml"
+
+# Detectron2 detection confidence threshold (default: 0.7)
+# Higher values = fewer but more confident detections
+detectron2_confidence_threshold: 0.7
+
+# Multi-Person Detection Options
+# ===============================
+
+# Whether to detect multiple people in images (default: true)
+# If false, only detects the most prominent person (faster)
+# If true, uses grid-based approach to detect multiple people
+detect_multiple_people: false
+
+# Confidence threshold for person detection (default: 0.5)
+# Higher values = more strict person detection
+person_detection_confidence: 0.6
+
+# Testing/Sampling Options
+# ========================
+
+# Percentage of images to process (default: 100)
+# Useful for testing on a subset of data
+# Can be integer or float: 0.1 = 0.1%, 1 = 1%, 10 = 10%, 100 = all images
+# Examples: 0.1 (0.1%), 1 (1%), 10 (10%), 100 (all images)
+sample_percentage: 100
+
+# Example Configurations
+# ======================
+
+# For maximum speed (large datasets):
+# model_complexity: 0
+# confidence_threshold: 0.3
+# save_pose_images: false
+
+# For maximum accuracy:
+# model_complexity: 2
+# confidence_threshold: 0.7
+# detection_confidence: 0.7
+
+# For debugging/visualization:
+# save_pose_images: true
+# confidence_threshold: 0.3
+
+# For quick testing (10% of images):
+# sample_percentage: 10
+# model_complexity: 0
+# save_pose_images: false
+
+# For development testing (1% of images):
+# sample_percentage: 1
+# confidence_threshold: 0.3
+
+# For very small testing (0.1% of images):
+# sample_percentage: 0.1
+# model_complexity: 0
+
+# For single-person detection (faster):
+# detect_multiple_people: false
+# model_complexity: 0
+
+# For maximum multi-person detection:
+# detect_multiple_people: true
+# person_detection_confidence: 0.3
+# confidence_threshold: 0.3
+
+# For Detectron2 pose extraction (excellent multi-person):
+# pose_method: "detectron2"
+# detectron2_confidence_threshold: 0.5
+# confidence_threshold: 0.5
+
+# For fastest Detectron2 (good for testing):
+# pose_method: "detectron2"
+# detectron2_model: "COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml"
+# sample_percentage: 1
+
+# For most accurate Detectron2:
+# pose_method: "detectron2" 
+# detectron2_model: "COCO-Keypoints/keypoint_rcnn_X_101_32x8d_FPN_3x.yaml"
+# detectron2_confidence_threshold: 0.8
+
+# Performance Notes
+# =================
+#
+# MediaPipe:
+# - No model files to download
+# - Automatic GPU acceleration
+# - Built-in 3D landmarks (33 landmarks)
+# - Real-time performance
+# - Good for single person, grid-based for multiple people
+# - Speeds: 10-100 images/second depending on complexity
+#
+# Detectron2:
+# - Downloads models automatically (first run slower)
+# - Excellent GPU acceleration with PyTorch
+# - COCO 17-keypoint format
+# - State-of-the-art multi-person detection
+# - Native multi-person support (no grid search needed)
+# - Speeds: 5-50 images/second depending on model
+# - Models: R_50_FPN (fastest) → R_101_FPN → X_101_32x8d (most accurate)
+#
+# Method Comparison:
+# - MediaPipe: Better for single person, faster, 3D landmarks
+# - Detectron2: Better for multiple people, more accurate bounding boxes
+#
+# Testing with sample_percentage:
+# - Use 0.1-1% for very quick development testing
+# - Use 1-10% for quick development testing  
+# - Use 100% for full production runs
+# - Supports floats: 0.1 = 0.1%, 1.5 = 1.5%, etc.
+# - Sampling is random but reproducible (seed=42)
+#
+# Multi-person detection:
+# - MediaPipe: Grid-based approach, 10-50 images/second
+# - Detectron2: Native multi-person, 5-50 images/second
+
+# Installation
+# ============
+# 
+# For MediaPipe (default):
+# pip install mediapipe
+#
+# For Detectron2 (optional, for better multi-person detection):
+# pip install torch torchvision  # Install PyTorch first
+# pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# 
+# Note: Detectron2 requires CUDA-compatible GPU for best performance
+# Models download automatically on first use (~100-500MB per model) 

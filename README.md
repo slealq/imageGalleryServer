@@ -37,6 +37,16 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## Running
+wsl
+sudo mount -t drvfs D: /mnt/d
+# pass 9571
+cd
+source unsloth/bin/activate
+python /mnt/c/playground/imageGalleryServer/main.py
+
+
+
 ## Configuration
 
 The service uses the following configuration:
