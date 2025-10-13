@@ -1,0 +1,39 @@
+# Ultralytics YOLO Pose Extraction Configuration
+# This configuration demonstrates how to use YOLO 11 for pose estimation and object detection
+
+# Input and Output Paths
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Pose Extraction Method
+pose_method: "ultralytics"  # Use Ultralytics YOLO for pose extraction
+
+# Core Detection Settings
+confidence_threshold: 0.5  # Minimum confidence for pose keypoints
+person_detection_confidence: 0.6  # Minimum confidence for person detection
+
+# Ultralytics YOLO Specific Settings
+ultralytics_model: "yolo11n-pose.pt"  # YOLO 11 nano pose model (options: yolo11n-pose.pt, yolo11s-pose.pt, yolo11m-pose.pt, yolo11l-pose.pt, yolo11x-pose.pt)
+ultralytics_device: "auto"  # Device selection: 'auto', 'cpu', 'cuda', or device number (e.g., 0, 1)
+
+# Additional Object Detection Features
+enable_object_detection: true  # Enable detection of objects beyond people
+object_classes: ["person"]  # Classes to detect (use ["all"] for all COCO classes)
+# Available COCO classes include: person, bicycle, car, motorcycle, airplane, bus, train, truck, boat, 
+# traffic light, fire hydrant, stop sign, parking meter, bench, bird, cat, dog, horse, sheep, cow, etc.
+
+# Multi-Person Detection
+detect_multiple_people: true  # Enable detection of multiple people in images
+
+# Processing Options
+sample_percentage: 100  # Percentage of images to process (1-100)
+use_gpu: true  # Use GPU acceleration if available
+
+# Output Options
+save_pose_images: true  # Save visualization images with detected poses
+
+# Advanced YOLO Settings (optional)
+# These can be added for fine-tuning:
+# iou_threshold: 0.7  # IoU threshold for Non-Maximum Suppression
+# max_detections: 300  # Maximum number of detections per image
+# agnostic_nms: false  # Class-agnostic Non-Maximum Suppression 

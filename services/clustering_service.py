@@ -87,6 +87,10 @@ class ClusteringService:
         self.embedding_paths = None
         self.pose_data = None
         self.pose_paths = None
+        # NEW: Canny edge feature data
+        self.feature_data = None
+        self.feature_paths = None
+        self.canny_features = None
         self.feature_vectors = None
         self.image_paths = None
         self.clusters = None
@@ -106,10 +110,12 @@ class ClusteringService:
         
         # Set defaults for optional parameters
         config.setdefault('clustering_method', 'faiss_similarity')  # 'faiss_similarity', 'kmeans', 'hdbscan', 'dbscan'
-        config.setdefault('feature_type', 'combined')  # 'pose', 'embedding', 'combined'
+        config.setdefault('feature_type', 'combined')  # 'pose', 'embedding', 'combined', 'canny', 'canny_embedding'
         config.setdefault('n_clusters', 'auto')  # number or 'auto'
         config.setdefault('pose_weight', 0.5)
         config.setdefault('embedding_weight', 0.5)
+        # NEW: Canny edge feature weight
+        config.setdefault('canny_weight', 0.4)
         config.setdefault('pose_confidence_threshold', 0.2)
         config.setdefault('max_examples_per_cluster', 50)
         config.setdefault('min_cluster_size', 5)
@@ -143,12 +149,18 @@ class ClusteringService:
             config['embeddings_path'] = Path(config['embeddings_path'])
         if config.get('pose_data_path'):
             config['pose_data_path'] = Path(config['pose_data_path'])
+        # NEW: Feature extraction data path
+        if config.get('feature_data_path'):
+            config['feature_data_path'] = Path(config['feature_data_path'])
         
         # Validate feature type requirements
-        if config['feature_type'] in ['embedding', 'combined'] and not config.get('embeddings_path'):
-            raise ValueError("embeddings_path required when feature_type is 'embedding' or 'combined'")
+        if config['feature_type'] in ['embedding', 'combined', 'canny_embedding'] and not config.get('embeddings_path'):
+            raise ValueError("embeddings_path required when feature_type is 'embedding', 'combined', or 'canny_embedding'")
         if config['feature_type'] in ['pose', 'combined'] and not config.get('pose_data_path'):
             raise ValueError("pose_data_path required when feature_type is 'pose' or 'combined'")
+        # NEW: Validate canny feature requirements
+        if config['feature_type'] in ['canny', 'canny_embedding'] and not config.get('feature_data_path'):
+            raise ValueError("feature_data_path required when feature_type is 'canny' or 'canny_embedding'")
         
         # Validate weights for combined features
         if config['feature_type'] == 'combined':
@@ -156,6 +168,12 @@ class ClusteringService:
             embedding_weight = config['embedding_weight']
             if abs((pose_weight + embedding_weight) - 1.0) > 0.01:
                 logger.warning(f"pose_weight ({pose_weight}) + embedding_weight ({embedding_weight}) != 1.0")
+        # NEW: Validate weights for canny+embedding features
+        elif config['feature_type'] == 'canny_embedding':
+            canny_weight = config['canny_weight']
+            embedding_weight = config['embedding_weight']
+            if abs((canny_weight + embedding_weight) - 1.0) > 0.01:
+                logger.warning(f"canny_weight ({canny_weight}) + embedding_weight ({embedding_weight}) != 1.0")
         
         self.config = config
         logger.info(f"Configuration loaded and validated successfully from {config_path}")
@@ -231,6 +249,74 @@ class ClusteringService:
         logger.info(f"Filtered poses with confidence >= {confidence_threshold}")
         
         return valid_poses, valid_paths
+    
+    def load_feature_data(self, feature_data_path: Path) -> Tuple[Dict[str, np.ndarray], List[str]]:
+        """
+        Load feature extraction data from feature extraction service results.
+        
+        Args:
+            feature_data_path: Path to feature extraction results directory or feature_vectors.npz file
+            
+        Returns:
+            Tuple of (feature_data_dict, feature_image_paths)
+        """
+        if not feature_data_path.exists():
+            raise FileNotFoundError(f"Feature data path not found: {feature_data_path}")
+        
+        # Handle both directory and direct file paths
+        if feature_data_path.is_dir():
+            feature_npz_path = feature_data_path / "feature_vectors.npz"
+        else:
+            feature_npz_path = feature_data_path
+        
+        if not feature_npz_path.exists():
+            raise FileNotFoundError(f"Feature vectors file not found: {feature_npz_path}")
+        
+        # Load feature data
+        data = np.load(feature_npz_path)
+        
+        # Extract feature methods and image paths
+        feature_methods = data.get('feature_methods', []).tolist()
+        image_paths = data.get('image_paths', []).tolist()
+        
+        # Extract feature vectors for each method
+        feature_data = {}
+        for method in feature_methods:
+            vector_key = f'{method}_vectors'
+            if vector_key in data:
+                feature_data[method] = data[vector_key]
+        
+        self.feature_data = feature_data
+        self.feature_paths = image_paths
+        
+        logger.info(f"Loaded feature data for {len(image_paths)} images")
+        logger.info(f"Available feature methods: {feature_methods}")
+        if 'canny' in feature_data:
+            logger.info(f"Canny features shape: {feature_data['canny'].shape}")
+        
+        return feature_data, image_paths
+    
+    def extract_canny_features(self, image_path: str) -> Optional[np.ndarray]:
+        """
+        Extract Canny edge feature vector for a specific image.
+        
+        Args:
+            image_path: Path to the image
+            
+        Returns:
+            Canny feature vector or None if not found
+        """
+        if self.feature_data is None or 'canny' not in self.feature_data:
+            return None
+        
+        # Normalize paths for comparison
+        target_path = Path(image_path).resolve()
+        
+        for i, feature_path in enumerate(self.feature_paths):
+            if Path(feature_path).resolve() == target_path:
+                return self.feature_data['canny'][i]
+        
+        return None
     
     def extract_pose_features(self, pose_item: Dict) -> Optional[np.ndarray]:
         """
@@ -369,6 +455,103 @@ class ClusteringService:
         logger.info(f"Using {len(self.embeddings)} embedding feature vectors of dimension {self.embeddings.shape[1]}")
         return self.embeddings.copy(), self.embedding_paths.copy()
     
+    def create_canny_only_features(self) -> Tuple[np.ndarray, List[str]]:
+        """
+        Create feature vectors from Canny edge data only.
+        
+        Returns:
+            Tuple of (feature_vectors, image_paths)
+        """
+        if self.feature_data is None or 'canny' not in self.feature_data:
+            raise ValueError("No Canny feature data available")
+        
+        canny_features = self.feature_data['canny']
+        feature_paths = self.feature_paths.copy()
+        
+        # Check if we have enhanced spatial features (86 dimensions) or legacy features (10 dimensions)
+        feature_dim = canny_features.shape[1]
+        logger.info(f"Canny features have {feature_dim} dimensions")
+        
+        if feature_dim >= 80:  # Enhanced spatial features
+            logger.info("Using enhanced spatial Canny features for better shape clustering")
+            
+            # For spatial features, use more appropriate normalization
+            # Option 1: Standard normalization (mean=0, std=1) per feature dimension
+            canny_features_norm = (canny_features - np.mean(canny_features, axis=0)) / (np.std(canny_features, axis=0) + 1e-8)
+            
+            # Option 2: Min-max normalization (preserve relative magnitudes)
+            # canny_features_norm = (canny_features - np.min(canny_features, axis=0)) / (np.max(canny_features, axis=0) - np.min(canny_features, axis=0) + 1e-8)
+            
+            # Option 3: Light L2 normalization (less aggressive than before)
+            # canny_features_norm = canny_features / (np.linalg.norm(canny_features, axis=1, keepdims=True) + 1e-8)
+            
+        else:  # Legacy global features
+            logger.info("Using legacy global Canny features (recommend upgrading to spatial features)")
+            # Keep original L2 normalization for backward compatibility
+            canny_features_norm = canny_features / np.linalg.norm(canny_features, axis=1, keepdims=True)
+        
+        logger.info(f"Using {len(canny_features_norm)} Canny edge feature vectors of dimension {canny_features_norm.shape[1]}")
+        return canny_features_norm, feature_paths
+    
+    def create_canny_embedding_features(self) -> Tuple[np.ndarray, List[str]]:
+        """
+        Create combined feature vectors from Canny edge and embedding data.
+        
+        Returns:
+            Tuple of (feature_vectors, common_image_paths)
+        """
+        # Find common images between canny features and embedding data
+        canny_paths_set = set(Path(p).resolve() for p in self.feature_paths)
+        embedding_paths_set = set(Path(p).resolve() for p in self.embedding_paths)
+        common_paths = canny_paths_set.intersection(embedding_paths_set)
+        
+        if len(common_paths) == 0:
+            raise ValueError("No common images found between Canny features and embedding data")
+        
+        logger.info(f"Found {len(common_paths)} common images for Canny+embedding feature combination")
+        
+        # Create mappings
+        canny_path_to_idx = {Path(p).resolve(): i for i, p in enumerate(self.feature_paths)}
+        embedding_path_to_idx = {Path(p).resolve(): i for i, p in enumerate(self.embedding_paths)}
+        
+        combined_features = []
+        common_image_paths = []
+        
+        for common_path in common_paths:
+            canny_idx = canny_path_to_idx[common_path]
+            embedding_idx = embedding_path_to_idx[common_path]
+            
+            # Get Canny features
+            canny_features = self.feature_data['canny'][canny_idx]
+            
+            # Get embedding features
+            embedding_features = self.embeddings[embedding_idx]
+            
+            # Combine features with weights
+            canny_weight = self.config.get('canny_weight', 0.4)
+            embedding_weight = self.config.get('embedding_weight', 0.6)
+            
+            # Normalize feature dimensions
+            canny_features_norm = canny_features / np.linalg.norm(canny_features)
+            embedding_features_norm = embedding_features / np.linalg.norm(embedding_features)
+            
+            # Weighted combination
+            combined_feature = np.concatenate([
+                canny_weight * canny_features_norm,
+                embedding_weight * embedding_features_norm
+            ])
+            
+            combined_features.append(combined_feature)
+            common_image_paths.append(str(common_path))
+        
+        if len(combined_features) == 0:
+            raise ValueError("No valid Canny+embedding combined features could be created")
+        
+        feature_matrix = np.array(combined_features)
+        logger.info(f"Created {len(combined_features)} Canny+embedding feature vectors of dimension {feature_matrix.shape[1]}")
+        
+        return feature_matrix, common_image_paths
+    
     def create_feature_vectors(self) -> Tuple[np.ndarray, List[str]]:
         """
         Create feature vectors based on the configured feature type.
@@ -384,6 +567,10 @@ class ClusteringService:
             return self.create_embedding_only_features()
         elif feature_type == 'combined':
             return self.create_combined_features()
+        elif feature_type == 'canny':
+            return self.create_canny_only_features()
+        elif feature_type == 'canny_embedding':
+            return self.create_canny_embedding_features()
         else:
             raise ValueError(f"Unknown feature_type: {feature_type}")
     
@@ -472,7 +659,12 @@ class ClusteringService:
                 if self.config.get('faiss_index_type') == 'IndexFlatL2':
                     # For L2 distance, smaller is better
                     distances, indices = faiss_index.search(query_vector, k)
-                    similarities = 1.0 / (1.0 + distances[0])  # Convert distance to similarity
+                    
+                    # Better distance-to-similarity conversion for spatial features
+                    # Use exponential decay: similarity = exp(-distance/scale)
+                    # This gives more meaningful similarity values for spatial edge features
+                    scale = np.std(distances[0]) + 1e-6  # Adaptive scale based on distance distribution
+                    similarities = np.exp(-distances[0] / scale)
                 else:
                     # For IndexFlatIP, higher is better (already similarity)
                     similarities, indices = faiss_index.search(query_vector, k)
@@ -510,7 +702,10 @@ class ClusteringService:
                 
                 if self.config.get('faiss_index_type') == 'IndexFlatL2':
                     distances, indices = faiss_index.search(query_vector, k)
-                    similarities = 1.0 / (1.0 + distances[0])
+                    
+                    # Better distance-to-similarity conversion for spatial features
+                    scale = np.std(distances[0]) + 1e-6  # Adaptive scale based on distance distribution
+                    similarities = np.exp(-distances[0] / scale)
                 else:
                     similarities, indices = faiss_index.search(query_vector, k)
                     similarities = similarities[0]
@@ -1459,13 +1654,18 @@ class ClusteringService:
         actual_run_id = self.results_manager.create_run(run_id)
         
         # Load data based on feature type
-        if config['feature_type'] in ['embedding', 'combined']:
+        if config['feature_type'] in ['embedding', 'combined', 'canny_embedding']:
             logger.info("Loading embeddings...")
             self.load_embeddings(config['embeddings_path'])
         
         if config['feature_type'] in ['pose', 'combined']:
             logger.info("Loading pose data...")
             self.load_pose_data(config['pose_data_path'])
+        
+        # NEW: Load feature extraction data for Canny-based clustering
+        if config['feature_type'] in ['canny', 'canny_embedding']:
+            logger.info("Loading feature extraction data...")
+            self.load_feature_data(config['feature_data_path'])
         
         # Create feature vectors
         logger.info(f"Creating {config['feature_type']} feature vectors...")

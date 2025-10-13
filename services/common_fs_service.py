@@ -432,7 +432,8 @@ class ConfigValidator:
         'embeddings': ['dataset_path', 'model_name'],
         'clustering': ['feature_type'],  # Updated for new clustering service
         'similarity': ['embeddings_path', 'target_images'],
-        'pose_extraction': ['embeddings_path']
+        'pose_extraction': ['embeddings_path'],
+        'cluster_extraction': ['cluster_results_path', 'cluster_number']
     }
     
     @classmethod
@@ -555,16 +556,19 @@ class ConfigValidator:
         elif service_type == 'clustering':
             # Validate feature type
             feature_type = config.get('feature_type', 'combined')
-            valid_feature_types = ['pose', 'embedding', 'combined']
+            valid_feature_types = ['pose', 'embedding', 'combined', 'canny', 'canny_embedding']
             if feature_type not in valid_feature_types:
                 errors.append(f"feature_type must be one of: {valid_feature_types}, got: {feature_type}")
             
             # Validate data source requirements
-            if feature_type in ['embedding', 'combined'] and not config.get('embeddings_path'):
-                errors.append("embeddings_path is required when feature_type is 'embedding' or 'combined'")
+            if feature_type in ['embedding', 'combined', 'canny_embedding'] and not config.get('embeddings_path'):
+                errors.append("embeddings_path is required when feature_type is 'embedding', 'combined', or 'canny_embedding'")
             
             if feature_type in ['pose', 'combined'] and not config.get('pose_data_path'):
                 errors.append("pose_data_path is required when feature_type is 'pose' or 'combined'")
+            
+            if feature_type in ['canny', 'canny_embedding'] and not config.get('feature_data_path'):
+                errors.append("feature_data_path is required when feature_type is 'canny' or 'canny_embedding'")
             
             # Validate clustering method
             clustering_method = config.get('clustering_method', 'kmeans')
@@ -584,6 +588,17 @@ class ConfigValidator:
                 
                 if not isinstance(pose_weight, (int, float)) or not (0.0 <= pose_weight <= 1.0):
                     errors.append("pose_weight must be a number between 0.0 and 1.0")
+                
+                if not isinstance(embedding_weight, (int, float)) or not (0.0 <= embedding_weight <= 1.0):
+                    errors.append("embedding_weight must be a number between 0.0 and 1.0")
+            
+            # Validate weights for canny+embedding features
+            elif feature_type == 'canny_embedding':
+                canny_weight = config.get('canny_weight', 0.4)
+                embedding_weight = config.get('embedding_weight', 0.6)
+                
+                if not isinstance(canny_weight, (int, float)) or not (0.0 <= canny_weight <= 1.0):
+                    errors.append("canny_weight must be a number between 0.0 and 1.0")
                 
                 if not isinstance(embedding_weight, (int, float)) or not (0.0 <= embedding_weight <= 1.0):
                     errors.append("embedding_weight must be a number between 0.0 and 1.0")
@@ -626,7 +641,43 @@ class ConfigValidator:
                     errors.append("use_iterative_clustering must be a boolean")
             
             # Validate boolean fields
-            for bool_field in ['copy_examples', 'generate_visualizations', 'generate_pose_overlays']:
+            for bool_field in ['copy_examples', 'generate_visualizations', 'generate_pose_overlays', 'generate_cluster_collages']:
+                if bool_field in config and not isinstance(config[bool_field], bool):
+                    errors.append(f"{bool_field} must be a boolean, got: {type(config[bool_field])}")
+                    
+        elif service_type == 'cluster_extraction':
+            # Validate cluster_number field - can be int or list of ints
+            cluster_number = config.get('cluster_number')
+            if cluster_number is not None:
+                if isinstance(cluster_number, int):
+                    # Single cluster number is valid
+                    pass
+                elif isinstance(cluster_number, list):
+                    # List of cluster numbers
+                    if len(cluster_number) == 0:
+                        errors.append("cluster_number list cannot be empty")
+                    else:
+                        for i, num in enumerate(cluster_number):
+                            if not isinstance(num, int):
+                                try:
+                                    int(num)  # Try to convert to int
+                                except (ValueError, TypeError):
+                                    errors.append(f"cluster_number[{i}] must be an integer, got: {type(num)}")
+                else:
+                    # Try to convert single value to int
+                    try:
+                        int(cluster_number)
+                    except (ValueError, TypeError):
+                        errors.append(f"cluster_number must be an integer or list of integers, got: {type(cluster_number)}")
+            
+            # Validate copy_method
+            copy_method = config.get('copy_method', 'copy')
+            valid_copy_methods = ['copy', 'symlink', 'hardlink']
+            if copy_method not in valid_copy_methods:
+                errors.append(f"copy_method must be one of: {valid_copy_methods}, got: {copy_method}")
+            
+            # Validate boolean fields
+            for bool_field in ['preserve_structure', 'create_index', 'include_metadata']:
                 if bool_field in config and not isinstance(config[bool_field], bool):
                     errors.append(f"{bool_field} must be a boolean, got: {type(config[bool_field])}")
                     

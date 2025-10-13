@@ -1,0 +1,89 @@
+# Cluster Extraction Service Configuration
+# Extracts all images from a specific cluster into a new directory structure
+#
+# This service takes clustering results from a previous clustering service run
+# and extracts all images from a specified cluster number into an organized
+# directory structure for further analysis or manual review.
+
+# Required Fields
+# ---------------
+
+# Path to clustering service results directory
+# Should contain either 'detailed_clusters.json' (preferred) or 'cluster_analysis.json'
+# Example: "/path/to/results/clustering/20250721_140123_abc123de/"
+cluster_results_path: "/mnt/d/TEST/similarity_engine_results/results/clustering/20250723_074144_aa42545c/"
+
+# Cluster number(s) to extract
+# Single cluster: Use an integer (-1 for noise cluster, positive integers for regular clusters)
+# Multiple clusters: Use a list of integers
+# Check clustering results to see available cluster numbers
+# Examples:
+#   cluster_number: 5                    # Extract single cluster 5
+#   cluster_number: [1, 3, 5, 7]        # Extract multiple clusters
+#   cluster_number: [-1, 0, 1, 2]       # Extract noise cluster and first 3 clusters
+# footjob, sitting with feet to right, guy laying down/sitting
+cluster_number: [82,110,136,139,157,160,181]
+
+# Output directory where extracted images will be saved
+# Results will be organized in: output_path/results/cluster_extraction/{run_id}/
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Optional Fields (with defaults)
+# --------------------------------
+
+# Method for copying images (default: 'copy')
+# Options:
+# - 'copy': Full file copy (safest, uses more disk space)
+# - 'symlink': Symbolic links (fastest, saves disk space)
+# - 'hardlink': Hard links (fast, saves space, Unix/Linux only)
+copy_method: "copy"
+
+# Whether to preserve original directory structure (default: true)
+# If true, attempts to maintain original filenames and avoid conflicts
+# If false, uses simple numbered naming (image_0001.jpg, image_0002.jpg, etc.)
+preserve_structure: true
+
+# Create index file with image mapping and metadata (default: true)
+# Generates cluster_index.json with mapping between original and copied paths
+create_index: true
+
+# Include cluster metadata in results (default: true)
+# Includes original cluster size, percentage, noise status, etc.
+include_metadata: true
+
+# Example Usage:
+# --------------
+# python cluster_extraction_service.py cluster_extraction_config.yaml
+#
+# This will:
+# 1. Load cluster results from the specified path
+# 2. Extract all images from the specified cluster number(s)
+# 3. Copy them to organized directory structures (one per cluster)
+# 4. Create a comprehensive index file mapping original to copied paths
+# 5. Generate extraction summary and metadata for all clusters
+#
+# Output Structure (multi-cluster example):
+# output_path/results/cluster_extraction/{run_id}/
+# ├── extracted_images/
+# │   ├── cluster_001/          # First cluster
+# │   │   ├── image1.jpg
+# │   │   ├── image2.jpg
+# │   │   └── ...
+# │   ├── cluster_003/          # Second cluster
+# │   │   ├── image1.jpg
+# │   │   ├── image2.jpg
+# │   │   └── ...
+# │   ├── cluster_005/          # Third cluster
+# │   │   └── ...
+# │   └── cluster_007/          # Fourth cluster
+# │       └── ...
+# ├── cluster_index.json        # Comprehensive index with all clusters and images
+# ├── extraction_summary.json   # Summary statistics for all extracted clusters
+# ├── config.yaml              # Copy of configuration used
+# └── result_metadata.json     # Result metadata
+#
+# Benefits of Multi-Cluster Extraction:
+# - Browse through multiple clusters in a single results folder
+# - Compare clusters side-by-side
+# - Comprehensive index shows all extracted images across clusters
+# - Single extraction run for multiple clusters saves time 

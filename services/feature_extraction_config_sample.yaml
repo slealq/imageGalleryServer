@@ -1,0 +1,82 @@
+# Feature Extraction Service Configuration
+# This configuration demonstrates how to extract visual features using computer vision algorithms
+
+# Input and Output Paths
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Feature Extraction Methods (optimized for efficiency)
+feature_methods:
+  - "canny"           # Canny edge detection only (for efficiency)
+
+# Processing Options
+sample_percentage: 100  # Percentage of images to process (1-100)
+save_feature_images: true  # Enable to save feature visualizations for verification
+visualization_sample_size: 30  # Number of visualizations to save when save_feature_images is true
+image_resize: [512, 512]  # Resize images to [width, height] for processing (null for no resize)
+
+# Memory Optimization Settings (to prevent memory crashes)
+batch_size: 100           # Process images in batches to manage memory 
+max_visualizations: 30     # Maximum visualizations to save (overridden by visualization_sample_size when save_feature_images is true)
+force_gc_interval: 25     # Force garbage collection every N images
+store_as_vectors_only: true  # Store only feature vectors, not full feature data (visualizations generated on-demand)
+
+# Canny Edge Detection Settings
+canny_low_threshold: 50    # Lower threshold for edge detection
+canny_high_threshold: 150  # Upper threshold for edge detection
+canny_aperture_size: 3     # Aperture size for Sobel operator
+
+# Harris Corner Detection Settings (disabled for efficiency)
+# harris_block_size: 2       # Size of neighborhood for corner detection
+# harris_ksize: 3           # Sobel derivative kernel size
+# harris_k: 0.04            # Harris detector free parameter
+# harris_threshold: 0.01    # Threshold for corner detection
+
+# Local Binary Patterns (LBP) Settings (disabled for efficiency)
+# lbp_radius: 3             # Radius of LBP
+# lbp_n_points: 24          # Number of sample points for LBP
+# lbp_method: "uniform"     # LBP method: "uniform", "ror", "var"
+
+# Color Histogram Settings (disabled for efficiency)
+# hist_bins: 256            # Number of histogram bins
+# hist_channels: [0, 1, 2]  # Color channels to analyze (0=R/Gray, 1=G, 2=B)
+
+# Gray-Level Co-occurrence Matrix (GLCM) Settings (disabled for efficiency)
+# glcm_distances: [1]       # Pixel distances for GLCM calculation
+# glcm_angles: [0, 45, 90, 135]  # Angles in degrees for GLCM
+
+# ORB Keypoint Detection Settings (disabled for efficiency)
+# orb_max_features: 500     # Maximum number of ORB features to detect
+# orb_scale_factor: 1.2     # Pyramid decimation ratio for ORB
+# orb_n_levels: 8          # Number of pyramid levels for ORB
+
+# HOG (Histogram of Oriented Gradients) Settings (disabled for efficiency)
+# hog_orientations: 9       # Number of orientation bins
+# hog_pixels_per_cell: [8, 8]    # Size of cells for HOG
+# hog_cells_per_block: [2, 2]    # Number of cells per block for HOG
+
+# Advanced Options
+# These require additional libraries (scikit-image, mahotas)
+# Install with: pip install scikit-image mahotas
+
+# Visualization Behavior:
+# - When save_feature_images: true, visualizations_sample_size controls how many visualizations to save
+# - When save_feature_images: false, no visualizations are saved (maximum efficiency)
+# - Visualization sample is taken from the first N successful feature extractions
+
+# Feature Use Cases:
+# - canny: Good for detecting object boundaries and structural elements (ENABLED)
+# - harris: Excellent for corner/interest point detection (DISABLED for efficiency)
+# - lbp: Perfect for texture analysis and pattern recognition (DISABLED for efficiency)
+# - color_histogram: Ideal for color-based similarity matching (DISABLED for efficiency)
+# - glcm: Advanced texture analysis with statistical properties (DISABLED for efficiency)
+# - orb: Scale and rotation invariant keypoint matching (DISABLED for efficiency)
+# - hog: Great for object detection and shape analysis (DISABLED for efficiency)
+# - haralick: Comprehensive texture characterization (DISABLED for efficiency)
+
+# Memory Management Notes:
+# - Only Canny features enabled for maximum efficiency
+# - store_as_vectors_only: true prevents storing large feature maps (visualizations generated on-demand)
+# - save_feature_images: true will re-extract visual data only for the sample being visualized
+# - Feature vectors stored as compressed numpy arrays (.npz) instead of JSON
+# - Batch processing prevents memory accumulation 

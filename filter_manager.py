@@ -86,6 +86,8 @@ class FilterManager:
             filename_base = os.path.splitext(filename)[0]
             file_path = os.path.join(PHOTOSET_METADATA_DIRECTORY, filename)
             try:
+                print(f"Reading photoset metadata from {file_path}")
+
                 with open(file_path, 'r') as f:
                     data = json.load(f)
                     

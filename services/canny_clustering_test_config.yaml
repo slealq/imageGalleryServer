@@ -1,0 +1,53 @@
+# Canny Edge Clustering Test Configuration
+# Experimental configuration for clustering using Canny edge features
+
+# Required Paths
+# --------------
+# NOTE: Update these paths to match your actual data locations
+
+# Path to embeddings (required for canny_embedding feature type)
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+
+# Path to feature extraction data with Canny features (required)
+feature_data_path: "/mnt/d/TEST/similarity_engine_results/results/feature_extraction/20250722_192749_17028669/feature_vectors.npz"
+
+# Output directory
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Clustering Configuration
+# ========================
+
+# EXPERIMENT 1: Pure Canny edge clustering
+# -----------------------------------------
+clustering_method: "faiss_similarity"
+feature_type: "canny"  # Use only Canny edge features
+faiss_index_type: "IndexFlatIP"
+similarity_threshold: 0.7
+max_cluster_search_depth: 100
+use_iterative_clustering: true
+
+# Quality Settings
+min_cluster_size: 8
+max_examples_per_cluster: 30
+pose_confidence_threshold: 0.0  # Not used for canny-only
+
+# Output Settings
+copy_examples: true
+generate_pose_overlays: false  # No pose data for canny-only
+generate_cluster_collages: true
+generate_visualizations: true
+
+# NOTE: To test Canny + Embedding hybrid clustering, uncomment below:
+# EXPERIMENT 2: Canny + Embedding hybrid clustering
+# --------------------------------------------------
+# feature_type: "canny_embedding"
+# canny_weight: 0.4          # Weight for edge features
+# embedding_weight: 0.6      # Weight for semantic features
+# similarity_threshold: 0.75
+# min_cluster_size: 10
+# generate_pose_overlays: false  # No pose data in this experiment
+
+# Expected Results:
+# - Canny-only: Clusters based on edge patterns, texture, and structure
+# - Canny+embedding: Hybrid clusters combining edge similarity with semantic content
+# - Useful for architectural images, textures, patterns, or structural similarities 

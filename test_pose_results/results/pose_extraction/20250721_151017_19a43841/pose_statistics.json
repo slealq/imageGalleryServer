@@ -1,0 +1,9 @@
+{
+  "total_images_processed": 50,
+  "successful_pose_extractions": 42,
+  "success_rate": 0.84,
+  "average_pose_confidence": 0.7089761657005913,
+  "average_persons_per_image": 1.3571428571428572,
+  "pose_extraction_method": "openpose",
+  "confidence_threshold": 0.1
+}

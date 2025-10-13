@@ -52,6 +52,16 @@ except ImportError as e:
     logger.warning("Please install Detectron2: pip install 'git+https://github.com/facebookresearch/detectron2.git'")
     DETECTRON2_AVAILABLE = False
 
+# Try to import Ultralytics YOLO
+try:
+    from ultralytics import YOLO
+    ULTRALYTICS_AVAILABLE = True
+    logger.info("Ultralytics YOLO library imported successfully")
+except ImportError as e:
+    logger.warning(f"Ultralytics YOLO library not found: {e}")
+    logger.warning("Please install Ultralytics: pip install ultralytics")
+    ULTRALYTICS_AVAILABLE = False
+
 
 class PoseExtractionService:
     """
@@ -71,13 +81,14 @@ class PoseExtractionService:
         self.pose_detector = None
         self.person_detector = None
         self.detectron2_predictor = None
+        self.ultralytics_model = None
         
     def load_config(self, config_path: Union[str, Path]) -> Dict[str, Any]:
         """Load and validate configuration for pose extraction."""
         config = validate_config(config_path, 'pose_extraction')
         
         # Set defaults
-        config.setdefault('pose_method', 'mediapipe')  # 'mediapipe' or 'detectron2'
+        config.setdefault('pose_method', 'mediapipe')  # 'mediapipe', 'detectron2', or 'ultralytics'
         config.setdefault('confidence_threshold', 0.5)
         config.setdefault('detection_confidence', 0.5)
         config.setdefault('tracking_confidence', 0.5)
@@ -90,6 +101,11 @@ class PoseExtractionService:
         # Detectron2 specific settings
         config.setdefault('detectron2_model', 'COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml')
         config.setdefault('detectron2_confidence_threshold', 0.7)
+        # Ultralytics specific settings
+        config.setdefault('ultralytics_model', 'yolo11n-pose.pt')  # YOLO 11 nano pose model
+        config.setdefault('ultralytics_device', 'auto')  # 'auto', 'cpu', 'cuda', or device number
+        config.setdefault('enable_object_detection', True)  # Enable additional object detection features
+        config.setdefault('object_classes', ['person'])  # Classes to detect (default: just person)
         
         # Convert paths
         config['embeddings_path'] = Path(config['embeddings_path'])
@@ -107,8 +123,10 @@ class PoseExtractionService:
             return self._setup_mediapipe()
         elif pose_method == 'detectron2':
             return self._setup_detectron2()
+        elif pose_method == 'ultralytics':
+            return self._setup_ultralytics()
         else:
-            raise ValueError(f"Unknown pose method: {pose_method}. Use 'mediapipe' or 'detectron2'")
+            raise ValueError(f"Unknown pose method: {pose_method}. Use 'mediapipe', 'detectron2', or 'ultralytics'")
     
     def _setup_mediapipe(self) -> bool:
         """Setup MediaPipe pose detector."""
@@ -180,6 +198,40 @@ class PoseExtractionService:
         logger.info("✅ Detectron2 Keypoint R-CNN initialized successfully")
         return True
     
+    def _setup_ultralytics(self) -> bool:
+        """Setup Ultralytics YOLO model for pose detection and object detection."""
+        if not ULTRALYTICS_AVAILABLE:
+            raise ImportError("Ultralytics YOLO not available. Install with: pip install ultralytics")
+        
+        model_name = self.config.get('ultralytics_model', 'yolo11n-pose.pt')
+        device = self.config.get('ultralytics_device', 'auto')
+        
+        # Initialize YOLO model
+        self.ultralytics_model = YOLO(model_name)
+        
+        # Configure device
+        use_gpu = self.config.get('use_gpu', True)
+        if device == 'auto':
+            if use_gpu:
+                try:
+                    import torch
+                    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                except ImportError:
+                    device = 'cpu'
+            else:
+                device = 'cpu'
+        
+        # Move model to device
+        if hasattr(self.ultralytics_model.model, 'to'):
+            self.ultralytics_model.model.to(device)
+        
+        logger.info(f"🚀 Ultralytics YOLO model '{model_name}' initialized successfully")
+        logger.info(f"   Device: {device}")
+        logger.info(f"   Pose detection enabled: {'pose' in model_name.lower()}")
+        logger.info(f"   Object detection enabled: {self.config.get('enable_object_detection', True)}")
+        
+        return True
+    
     def load_embeddings(self, embeddings_path: Path) -> Tuple[np.ndarray, List[str]]:
         """Load pre-computed embeddings and optionally sample a subset."""
         if not embeddings_path.exists():
@@ -224,6 +276,8 @@ class PoseExtractionService:
             return self._extract_pose_mediapipe(image_path)
         elif pose_method == 'detectron2':
             return self._extract_pose_detectron2(image_path)
+        elif pose_method == 'ultralytics':
+            return self._extract_pose_ultralytics(image_path)
         else:
             raise ValueError(f"Unknown pose method: {pose_method}")
     
@@ -393,6 +447,167 @@ class PoseExtractionService:
                 'error': str(e)
             }
     
+    def _extract_pose_ultralytics(self, image_path: str) -> Dict[str, Any]:
+        """Extract pose and additional features using Ultralytics YOLO."""
+        try:
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not load image: {image_path}")
+            
+            # Run prediction with configured confidence
+            confidence = self.config.get('person_detection_confidence', 0.5)
+            results = self.ultralytics_model.predict(
+                image, 
+                conf=confidence,
+                verbose=False  # Reduce logging noise
+            )
+            
+            pose_data = {
+                'image_path': image_path,
+                'people': [],
+                'person_count': 0,
+                'has_pose': False,
+                'pose_method': 'ultralytics',
+                'additional_detections': []  # For feet, hands, other objects
+            }
+            
+            # Extract detections
+            if not results or len(results) == 0:
+                return pose_data
+                
+            detections = results[0]
+            
+            # Check if model supports pose keypoints
+            has_keypoints = hasattr(detections, 'keypoints') and detections.keypoints is not None
+            
+            # Get basic detection data
+            if hasattr(detections, 'boxes') and detections.boxes is not None:
+                boxes = detections.boxes.xyxy.cpu().numpy()  # Shape: (N, 4)
+                scores = detections.boxes.conf.cpu().numpy()  # Shape: (N,)
+                class_ids = detections.boxes.cls.cpu().numpy()  # Shape: (N,)
+            else:
+                return pose_data
+            
+            confidence_threshold = self.config.get('confidence_threshold', 0.5)
+            detected_people = []
+            additional_detections = []
+            
+            h, w = image.shape[:2]
+            
+            # Extract keypoints if available
+            keypoints = None
+            if has_keypoints:
+                keypoints = detections.keypoints.xy.cpu().numpy()  # Shape: (N, 17, 2)
+                keypoint_conf = detections.keypoints.conf.cpu().numpy()  # Shape: (N, 17)
+            
+            # Process each detection
+            for detection_idx in range(len(boxes)):
+                detection_score = scores[detection_idx]
+                detection_box = boxes[detection_idx]  # [x1, y1, x2, y2]
+                class_id = int(class_ids[detection_idx])
+                
+                # Filter by detection confidence
+                if detection_score < confidence_threshold:
+                    continue
+                
+                # Get class name if available
+                class_name = 'unknown'
+                if hasattr(self.ultralytics_model, 'names') and class_id in self.ultralytics_model.names:
+                    class_name = self.ultralytics_model.names[class_id]
+                
+                # Handle person detections with pose data
+                if class_name == 'person' and has_keypoints and detection_idx < len(keypoints):
+                    person_keypoints = keypoints[detection_idx]  # Shape: (17, 2)
+                    person_conf = keypoint_conf[detection_idx]  # Shape: (17,)
+                    
+                    # Convert keypoints to our format
+                    landmarks_2d = []
+                    confidence_scores = []
+                    
+                    for i, (kp, conf) in enumerate(zip(person_keypoints, person_conf)):
+                        x, y = kp
+                        # Normalize coordinates to [0, 1]
+                        landmarks_2d.extend([float(x / w), float(y / h)])
+                        confidence_scores.append(float(conf))
+                    
+                    # Calculate average confidence from visible keypoints
+                    visible_keypoints = [c for c in confidence_scores if c > 0.1]
+                    avg_confidence = np.mean(visible_keypoints) if visible_keypoints else 0.0
+                    
+                    detected_people.append({
+                        'person_id': len(detected_people),
+                        'landmarks': landmarks_2d,
+                        'landmarks_3d': None,  # Ultralytics doesn't provide 3D landmarks
+                        'pose_confidence': float(max(avg_confidence, detection_score)),
+                        'detection_score': float(detection_score),
+                        'visibility_scores': confidence_scores,
+                        'bounding_box': {
+                            'x1': float(detection_box[0]),
+                            'y1': float(detection_box[1]), 
+                            'x2': float(detection_box[2]),
+                            'y2': float(detection_box[3])
+                        },
+                        'keypoint_format': 'coco_17',  # COCO 17-keypoint format
+                        'class_name': class_name
+                    })
+                    
+                # Handle additional object detection if enabled
+                elif self.config.get('enable_object_detection', True):
+                    # Store detection for other interesting objects
+                    object_classes = self.config.get('object_classes', ['person'])
+                    if class_name in object_classes or 'all' in object_classes:
+                        additional_detections.append({
+                            'class_name': class_name,
+                            'class_id': class_id,
+                            'confidence': float(detection_score),
+                            'bounding_box': {
+                                'x1': float(detection_box[0]),
+                                'y1': float(detection_box[1]), 
+                                'x2': float(detection_box[2]),
+                                'y2': float(detection_box[3])
+                            }
+                        })
+            
+            # Update pose data with results
+            if detected_people:
+                # Sort by confidence (highest first)
+                detected_people.sort(key=lambda x: x['pose_confidence'], reverse=True)
+                
+                pose_data.update({
+                    'people': detected_people,
+                    'person_count': len(detected_people),
+                    'has_pose': True,
+                    # For backward compatibility, include first person's data at root level
+                    'landmarks': detected_people[0].get('landmarks'),
+                    'landmarks_3d': None,
+                    'pose_confidence': detected_people[0].get('pose_confidence', 0.0),
+                    'visibility_scores': detected_people[0].get('visibility_scores')
+                })
+            
+            # Add additional detections
+            pose_data['additional_detections'] = additional_detections
+            pose_data['total_detections'] = len(additional_detections)
+            
+            return pose_data
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract pose from {image_path}: {e}")
+            return {
+                'image_path': image_path,
+                'people': [],
+                'person_count': 0,
+                'has_pose': False,
+                'landmarks': None,
+                'landmarks_3d': None,
+                'pose_confidence': 0.0,
+                'visibility_scores': None,
+                'pose_method': 'ultralytics',
+                'additional_detections': [],
+                'total_detections': 0,
+                'error': str(e)
+            }
+    
     def _detect_single_person_mediapipe(self, image_rgb: np.ndarray, confidence_threshold: float) -> List[Dict[str, Any]]:
         """Detect pose for single person (original behavior)."""
         results = self.pose_detector.process(image_rgb)
@@ -532,10 +747,12 @@ class PoseExtractionService:
         all_poses = []
         successful_extractions = 0
         
-        logger.info(f"🎯 Processing {len(image_paths)} images with MediaPipe")
+        pose_method = self.config.get('pose_method', 'mediapipe')
+        logger.info(f"🎯 Processing {len(image_paths)} images with {pose_method.title()}")
         
         with tqdm(image_paths, desc="Extracting poses", unit="img") as pbar:
             total_people_detected = 0
+            total_additional_detections = 0
             for i, image_path in enumerate(pbar):
                 pose_data = self.extract_pose_from_image(image_path)
                 
@@ -543,17 +760,28 @@ class PoseExtractionService:
                     successful_extractions += 1
                     total_people_detected += pose_data.get('person_count', 0)
                 
+                # Track additional detections (for ultralytics)
+                if 'total_detections' in pose_data:
+                    total_additional_detections += pose_data.get('total_detections', 0)
+                
                 all_poses.append(pose_data)
                 
                 # Update progress
                 success_rate = (successful_extractions / (i + 1)) * 100
                 avg_people_per_image = total_people_detected / successful_extractions if successful_extractions > 0 else 0
-                pbar.set_postfix({
+                
+                progress_info = {
                     'Success': f"{successful_extractions}/{i + 1}",
                     'Rate': f"{success_rate:.1f}%",
                     'People': f"{total_people_detected}",
                     'Avg': f"{avg_people_per_image:.1f}/img"
-                })
+                }
+                
+                # Add additional detection info for ultralytics
+                if pose_method == 'ultralytics' and total_additional_detections > 0:
+                    progress_info['Objects'] = f"{total_additional_detections}"
+                
+                pbar.set_postfix(progress_info)
         
         logger.info(f"✅ Successfully extracted poses from {successful_extractions}/{len(image_paths)} images")
         return all_poses
@@ -688,6 +916,11 @@ class PoseExtractionService:
         avg_confidence = np.mean([p['pose_confidence'] for p in poses_with_landmarks]) if poses_with_landmarks else 0.0
         avg_people_per_image = total_people / successful_poses if successful_poses > 0 else 0.0
         
+        # Calculate additional detection statistics (for ultralytics)
+        total_additional_detections = sum(p.get('total_detections', 0) for p in all_poses)
+        images_with_additional_detections = sum(1 for p in all_poses if p.get('total_detections', 0) > 0)
+        avg_additional_per_image = total_additional_detections / images_with_additional_detections if images_with_additional_detections > 0 else 0.0
+        
         pose_method = config.get('pose_method', 'mediapipe')
         stats = {
             'total_images_processed': total_images,
@@ -699,7 +932,10 @@ class PoseExtractionService:
             'pose_extraction_method': pose_method,
             'confidence_threshold': config.get('confidence_threshold', 0.5),
             'detect_multiple_people': config.get('detect_multiple_people', True),
-            'person_detection_confidence': config.get('person_detection_confidence', 0.5)
+            'person_detection_confidence': config.get('person_detection_confidence', 0.5),
+            'total_additional_detections': total_additional_detections,
+            'images_with_additional_detections': images_with_additional_detections,
+            'average_additional_detections_per_image': float(avg_additional_per_image)
         }
         
         # Add method-specific settings
@@ -708,6 +944,11 @@ class PoseExtractionService:
         elif pose_method == 'detectron2':
             stats['detectron2_model'] = config.get('detectron2_model', 'COCO-Keypoints/keypoint_rcnn_R_50_FPN_3x.yaml')
             stats['detectron2_confidence_threshold'] = config.get('detectron2_confidence_threshold', 0.7)
+        elif pose_method == 'ultralytics':
+            stats['ultralytics_model'] = config.get('ultralytics_model', 'yolo11n-pose.pt')
+            stats['ultralytics_device'] = config.get('ultralytics_device', 'auto')
+            stats['enable_object_detection'] = config.get('enable_object_detection', True)
+            stats['object_classes'] = config.get('object_classes', ['person'])
         
         stats_path = results_dir / "pose_statistics.json"
         with open(stats_path, 'w') as f:
@@ -787,24 +1028,30 @@ class PoseExtractionService:
         # Performance summary
         successful = sum(1 for p in all_poses if p['has_pose'])
         total_people = sum(p.get('person_count', 0) for p in all_poses)
+        total_additional_detections = sum(p.get('total_detections', 0) for p in all_poses)
         images_per_second = len(image_paths) / processing_time if processing_time > 0 else 0
         avg_people_per_image = total_people / successful if successful > 0 else 0
         
-        logger.info(f"📊 Performance Summary:")
+        pose_method = config.get('pose_method', 'mediapipe')
+        logger.info(f"📊 Performance Summary ({pose_method.title()}):")
         logger.info(f"   Total time: {processing_time:.1f}s")
         logger.info(f"   Speed: {images_per_second:.1f} images/second")
         logger.info(f"   Success rate: {successful}/{len(image_paths)} ({successful/len(image_paths)*100:.1f}%)")
         logger.info(f"   People detected: {total_people} (avg: {avg_people_per_image:.1f}/image)")
         
+        # Add ultralytics-specific summary
+        if pose_method == 'ultralytics' and total_additional_detections > 0:
+            logger.info(f"   Additional objects detected: {total_additional_detections}")
+            
         # Save results
         self.save_results(all_poses, config)
         
         # Cleanup
-        if self.pose_detector:
+        if self.pose_detector and hasattr(self.pose_detector, 'close'):
             self.pose_detector.close()
-        if self.person_detector:
+        if self.person_detector and hasattr(self.person_detector, 'close'):
             self.person_detector.close()
-        # Detectron2 doesn't need explicit cleanup
+        # Detectron2 and Ultralytics don't need explicit cleanup
         
         return str(self.results_manager.get_results_dir())
 
@@ -818,7 +1065,7 @@ def extract_poses(config_path: Union[str, Path], run_id: Optional[str] = None) -
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Extract human poses using MediaPipe")
+    parser = argparse.ArgumentParser(description="Extract human poses using MediaPipe, Detectron2, or Ultralytics YOLO")
     parser.add_argument("config", help="Path to YAML configuration file")
     parser.add_argument("--run-id", help="Optional run identifier")
     

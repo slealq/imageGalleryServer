@@ -6,7 +6,7 @@
 
 # Path to the dataset directory containing images
 # The service will recursively search for supported image formats
-dataset_path: "/mnt/d/TEST/similarity_engine_results/results/dataset/20250721_102744_9434f341"
+dataset_path: "/mnt/d/TEST/similarity_engine_results/results/dataset/20250812_212002_b52ba511"
 
 # CLIP model name to use for embedding generation
 # Common options: ViT-B-32, ViT-B-16, ViT-L-14, RN50, RN101
@@ -24,7 +24,7 @@ output_path: "/mnt/d/TEST/similarity_engine_results/"
 # Larger values use more memory but may be faster
 # Reduce if you encounter out-of-memory errors
 batch_size: 32
-device: "auto"  # Options: "auto", "cuda", "cpu"
+device: "cuda"  # Options: "auto", "cuda", "cpu"
 target_size: 224
 
 # Pretrained weights to use

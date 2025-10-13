@@ -1,0 +1,33 @@
+# Feature Extraction Test Configuration
+# Using user's actual data paths for testing
+
+# Input and Output Paths
+embeddings_path: "/mnt/d/TEST/similarity_engine_results/results/embeddings/20250721_135402_8a9ef90e/embeddings.npz"
+output_path: "/mnt/d/TEST/similarity_engine_results/"
+
+# Feature Extraction Methods (start with fast methods for testing)
+feature_methods:
+  - "canny"           # Canny edge detection
+  - "harris"          # Harris corner detection
+  - "color_histogram" # Color histogram features
+  - "lbp"             # Local Binary Patterns (texture)
+
+# Processing Options
+sample_percentage: 0.1  # Process just 0.1% of images for quick testing
+save_feature_images: true  # Save visualization images
+image_resize: [256, 256]   # Resize for faster processing
+
+# Canny Edge Detection Settings
+canny_low_threshold: 50    # Lower threshold for edge detection
+canny_high_threshold: 150  # Upper threshold for edge detection
+
+# Harris Corner Detection Settings
+harris_threshold: 0.01     # Threshold for corner detection
+
+# LBP Settings (for texture analysis)
+lbp_radius: 2              # Smaller radius for faster processing
+lbp_n_points: 16           # Fewer points for speed
+
+# Color Histogram Settings
+hist_bins: 64              # Fewer bins for faster processing
+hist_channels: [0, 1, 2]   # RGB channels 
