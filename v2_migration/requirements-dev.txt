@@ -20,6 +20,7 @@ flake8==6.1.0
 mypy==1.7.1
 
 # Development
-ipython==8.18.1
+# ipython removed due to prompt-toolkit conflict with questionary
+# Use regular python REPL or install ipython separately if needed
 
 

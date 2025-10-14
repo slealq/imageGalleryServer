@@ -21,10 +21,12 @@ numpy==1.26.2
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.6
+httpx==0.25.2
 
 # CLI tools
 questionary==2.0.1
 rich==13.7.0
+prompt-toolkit==3.0.36  # Pin to avoid conflict
 
 # Future: Embeddings (commented out for now)
 # qdrant-client==1.7.0

@@ -320,33 +320,74 @@ alembic downgrade -1
 
 ## 🧪 Testing
 
-### Run Tests
+### Quick Start
 
 ```bash
-# All tests
+# Create test database (first time only)
+python scripts/create_test_db.py
+
+# Run all tests
 pytest
 
-# With coverage
+# Run with coverage
 pytest --cov=src --cov-report=html
 
-# Specific module
-pytest tests/unit/services/
+# Run only unit tests
+pytest tests/unit
+
+# Run only integration tests
+pytest tests/integration
+
+# Stop on first failure
+pytest -x
+```
+
+### Using the Test Runner
+
+```bash
+# Convenient shortcuts
+python scripts/run_tests.py              # All tests
+python scripts/run_tests.py --unit       # Unit tests only
+python scripts/run_tests.py --integration # Integration tests
+python scripts/run_tests.py --cov        # With coverage
+python scripts/run_tests.py --fast       # Stop on first failure
 ```
 
 ### Test Structure
 
 ```
 tests/
-├── unit/              # Unit tests
-│   ├── services/
-│   ├── repositories/
-│   └── caption_generators/
-├── integration/       # Integration tests
-│   ├── api/
-│   └── database/
-├── fixtures/          # Test fixtures
-└── conftest.py        # Pytest configuration
+├── conftest.py          # Pytest configuration & fixtures
+├── factories.py         # Test data factories
+├── unit/                # Unit tests
+│   └── test_repositories.py
+└── integration/         # Integration tests
+    ├── test_api_photosets.py
+    └── test_api_health.py
 ```
+
+### Key Fixtures
+
+- `db_session` - Clean database session for each test
+- `client` - Async HTTP client for API testing
+- `sample_photoset_data` - Sample photoset data
+- `sample_image_data` - Sample image data
+- `sample_caption_data` - Sample caption data
+
+### Test Factories
+
+```python
+from tests.factories import PhotosetFactory, ImageFactory, CaptionFactory
+
+# Create test data
+photoset = PhotosetFactory.create(name="Custom Name")
+image = ImageFactory.create(photoset_id=photoset.id)
+caption = CaptionFactory.create(image_id=image.id)
+```
+
+### Coverage Reports
+
+After running tests with `--cov`, open `htmlcov/index.html` in your browser to see detailed coverage.
 
 ## 📦 Dependencies
 
