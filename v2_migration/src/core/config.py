@@ -91,6 +91,14 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
+    def ensure_directories_exist(self):
+        """Ensure all storage directories exist."""
+        self.storage_root.mkdir(parents=True, exist_ok=True)
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        self.thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        self.crops_dir.mkdir(parents=True, exist_ok=True)
+        self.archives_dir.mkdir(parents=True, exist_ok=True)
+    
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):

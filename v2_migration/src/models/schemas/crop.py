@@ -1,60 +1,49 @@
 """Crop Pydantic schemas."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
 from uuid import UUID
+
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class NormalizedDeltas(BaseModel):
-    """Normalized delta coordinates for cropping."""
+    """Normalized delta coordinates."""
     
     x: float = Field(..., ge=-1.0, le=1.0, description="Normalized X delta")
     y: float = Field(..., ge=-1.0, le=1.0, description="Normalized Y delta")
 
 
 class CropBase(BaseModel):
-    """Base crop schema with common fields."""
+    """Base crop schema."""
     
-    target_size: int = Field(..., ge=64, le=4096, description="Target size in pixels")
+    target_size: int = Field(..., gt=0, description="Target size in pixels")
     normalized_delta_x: float = Field(..., ge=-1.0, le=1.0, description="Normalized X delta")
     normalized_delta_y: float = Field(..., ge=-1.0, le=1.0, description="Normalized Y delta")
 
 
 class CropCreate(BaseModel):
-    """Schema for creating a new crop."""
+    """Schema for creating a crop."""
     
-    image_id: UUID = Field(..., description="Image ID")
-    target_size: int = Field(..., ge=64, le=4096, description="Target size in pixels")
-    normalized_deltas: NormalizedDeltas = Field(..., description="Normalized deltas")
-
-
-class CropUpdate(BaseModel):
-    """Schema for updating a crop."""
-    
-    target_size: Optional[int] = Field(default=None, ge=64, le=4096)
-    normalized_deltas: Optional[NormalizedDeltas] = None
+    target_size: int = Field(..., gt=0, description="Target size in pixels")
+    normalized_deltas: NormalizedDeltas = Field(..., description="Normalized delta coordinates")
 
 
 class CropResponse(CropBase):
-    """Schema for crop responses."""
+    """Schema for crop response."""
     
-    id: UUID
-    image_id: UUID
-    crop_file_path: str
-    created_at: datetime
-    updated_at: datetime
+    id: UUID = Field(..., description="Crop UUID")
+    image_id: UUID = Field(..., description="Image UUID")
+    crop_file_path: str = Field(..., description="Crop file path")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CropWithImageResponse(BaseModel):
-    """Crop response with image URL."""
+    """Schema for crop response with image URL."""
     
     crop_info: CropResponse
-    image_url: str = Field(..., description="URL to access cropped image")
-    
-    class Config:
-        from_attributes = True
-
-
+    image_url: str = Field(..., description="URL to get cropped image")

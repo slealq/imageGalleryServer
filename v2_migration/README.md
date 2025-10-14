@@ -1,196 +1,484 @@
-# Image Gallery v2 - Database Migration
+# Image Gallery v2 - Database-Backed Architecture
 
-A scalable, database-backed image gallery service with native Windows support, featuring photoset management, image browsing, caption generation, cropping, tagging, and future-ready for embeddings and semantic search.
+A complete rewrite of the image gallery service with database-backed metadata, modular architecture, and native Windows support.
 
-## Key Features
+## 🌟 Features
 
-- 🗄️ **PostgreSQL Database**: Robust relational storage for all metadata
-- ⚡ **Redis Caching**: High-performance caching layer
-- 🖼️ **Image Management**: Upload, organize, and browse images by photosets
-- ✂️ **Cropping**: Create and manage image crops
-- 📝 **Captions**: Pluggable caption generation (Unsloth, OpenAI, etc.)
-- 🏷️ **Tagging**: Flexible tagging system for photosets and images
-- 🔍 **Filtering**: Search by actors, tags, years, and more
-- 📦 **Export**: Export selected images with crops and captions
-- 🚀 **Future Ready**: Database schema supports embeddings and vector search
+### Core Gallery Features
+- **Photoset Management**: Organize images in collections
+- **Image Browsing**: Efficient pagination and filtering
+- **Caption Generation**: Pluggable caption generators (Unsloth, OpenAI, etc.)
+- **Smart Cropping**: Store crop parameters and generate on-demand
+- **Tagging System**: Tag photosets and images for easy organization
+- **Thumbnail Generation**: Multiple sizes with caching
+- **Export to ZIP**: Export selected images
 
-## Installation
+### Advanced Features (Planned)
+- **Embedding Generation**: Support for CLIP, SigLIP models
+- **Semantic Search**: Find similar images using vector databases (Qdrant)
+- **Batch Processing**: Async processing for large operations
+
+## 🏗️ Architecture
+
+### Technology Stack
+
+**Core:**
+- Python 3.10+
+- FastAPI (async web framework)
+- PostgreSQL 14+ (relational database)
+- Redis 7+ / Memurai (caching)
+- SQLAlchemy 2.0 (async ORM)
+- Alembic (database migrations)
+
+**Image Processing:**
+- Pillow (PIL) for image manipulation
+- NumPy (for future embedding support)
+
+**Testing:**
+- Pytest with async support
+- Factory Boy for test fixtures
+
+### Project Structure
+
+```
+v2_migration/
+├── src/
+│   ├── api/                    # FastAPI routes and middleware
+│   │   ├── routes/             # Route modules
+│   │   ├── dependencies.py     # Dependency injection
+│   │   └── middleware.py       # Request timing, logging
+│   ├── core/                   # Core configuration
+│   │   ├── config.py           # Settings management
+│   │   ├── database.py         # DB session management
+│   │   ├── redis.py            # Redis client
+│   │   └── exceptions.py       # Custom exceptions
+│   ├── models/
+│   │   ├── database/           # SQLAlchemy ORM models
+│   │   └── schemas/            # Pydantic schemas
+│   ├── repositories/           # Data access layer
+│   ├── services/               # Business logic layer
+│   ├── caption_generators/     # Pluggable caption system
+│   └── main.py                 # FastAPI application
+├── scripts/                    # Utility scripts
+├── tests/                      # Test suite
+├── migrations/                 # Alembic migrations
+└── setup/                      # Installation scripts
+```
+
+### Layered Architecture
+
+```
+┌─────────────────────────────────────┐
+│     FastAPI Routes (API Layer)      │
+│  - Request validation               │
+│  - Response serialization           │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│    Services (Business Logic)        │
+│  - ImageService                     │
+│  - PhotosetService                  │
+│  - CaptionService                   │
+│  - CropService, etc.                │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   Repositories (Data Access)        │
+│  - ImageRepository                  │
+│  - PhotosetRepository               │
+│  - Generic BaseRepository           │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│      SQLAlchemy ORM Models          │
+│  - Database schema definitions      │
+└─────────────────────────────────────┘
+```
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.10 or higher
-- PostgreSQL 14+
-- Redis 7+
+- PostgreSQL 14+ or Docker
+- Redis 7+ or Memurai (for Windows)
 
-### Windows Installation
+### Installation (Windows)
 
-Run the automated installation script:
+1. **Clone the repository**
+   ```batch
+   cd v2_migration
+   ```
 
-```powershell
-.\setup\install_windows.ps1
-```
+2. **Run the setup wizard**
+   ```batch
+   setup\install_windows.bat
+   ```
 
-This will:
-1. Check Python version
-2. Offer to install PostgreSQL and Redis via Chocolatey
-3. Create a virtual environment
-4. Install Python dependencies
-5. Run the interactive setup wizard
+   This will:
+   - Create a virtual environment
+   - Install dependencies
+   - Run the interactive setup wizard
+   - Configure `.env` file
+   - Initialize the database
 
-### Manual Installation
+3. **Start the service**
+   ```batch
+   run_windows.bat
+   ```
 
-1. **Create virtual environment**:
+4. **Access the API**
+   - API Docs: http://localhost:8002/docs
+   - Health Check: http://localhost:8002/api/v2/health
+
+### Manual Setup
+
+1. **Create virtual environment**
    ```bash
    python -m venv .venv
    .venv\Scripts\activate  # Windows
+   # or
    source .venv/bin/activate  # Linux/Mac
    ```
 
-2. **Install dependencies**:
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run setup wizard**:
-   ```bash
-   python setup/setup_wizard.py
+3. **Configure environment**
+   
+   Copy `.env.example` to `.env` and configure:
+   ```env
+   DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/gallery_v2
+   REDIS_URL=redis://localhost:6379/0
+   STORAGE_ROOT=C:/gallery_storage
+   CAPTION_GENERATOR=dummy  # or 'unsloth'
    ```
 
-## Configuration
+4. **Initialize database**
+   ```bash
+   alembic upgrade head
+   ```
 
-The interactive setup wizard will guide you through:
+5. **Run the application**
+   ```bash
+   python src/main.py
+   ```
 
-1. **Storage paths**: Where to store images, thumbnails, crops
-2. **Migration sources**: Paths to existing data (optional)
-3. **Database**: PostgreSQL connection details
-4. **Redis**: Redis connection details
-5. **Caption generation**: Choose generator type (Unsloth, dummy, etc.)
-6. **Performance tuning**: Cache sizes, thumbnail dimensions
+## 📚 API Documentation
 
-All configuration is stored in `.env` file (never commit this file).
+### Core Endpoints
 
-## Running the Service
+#### Health Check
+```
+GET /api/v2/health
+```
+Returns service health status.
 
-### Windows
+#### Photosets
 
-```batch
-run_windows.bat
+```
+GET    /api/v2/photosets          # List photosets
+POST   /api/v2/photosets          # Create photoset
+GET    /api/v2/photosets/{id}     # Get photoset
+PUT    /api/v2/photosets/{id}     # Update photoset
+DELETE /api/v2/photosets/{id}     # Delete photoset
 ```
 
-### Cross-platform
+#### Images
 
+```
+GET    /api/v2/images/{id}                 # Get image file
+GET    /api/v2/images/{id}/metadata        # Get image metadata
+POST   /api/v2/images                      # Upload image
+DELETE /api/v2/images/{id}                 # Delete image
+```
+
+#### Thumbnails
+
+```
+GET /api/v2/images/{id}/thumbnail/{size}   # Get thumbnail (small/medium/large)
+```
+
+#### Captions
+
+```
+GET  /api/v2/images/{id}/caption           # Get caption
+POST /api/v2/images/{id}/caption           # Save caption
+POST /api/v2/images/{id}/caption/generate  # Generate caption
+```
+
+#### Crops
+
+```
+GET  /api/v2/images/{id}/crop              # Get crop metadata
+GET  /api/v2/images/{id}/cropped           # Get cropped image
+POST /api/v2/images/{id}/crop              # Create/update crop
+```
+
+#### Tags
+
+```
+GET  /api/v2/tags                          # List all tags
+POST /api/v2/images/{id}/tags              # Add tag to image
+```
+
+### Example Requests
+
+**Create a photoset:**
 ```bash
-python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8002
+curl -X POST http://localhost:8002/api/v2/photosets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Beach Photos 2024",
+    "year": 2024,
+    "source_url": "https://example.com/beach-2024"
+  }'
 ```
 
-Access the API documentation at: `http://localhost:8002/docs`
-
-## Data Migration
-
-If you have existing data, run the migration script after setup:
-
+**Generate a caption:**
 ```bash
-python scripts/bootstrap_data.py
+curl -X POST http://localhost:8002/api/v2/images/{image_id}/caption/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Describe this image in detail"}'
 ```
 
-This will:
-1. Extract photoset archives (zip/rar)
-2. Import metadata from JSON files
-3. Migrate existing captions and crops
-4. Generate thumbnails
-5. Validate data integrity
+## 🔧 Configuration
 
-## Testing
+All configuration is managed through environment variables (`.env` file):
 
-Run the test suite:
+### Required Settings
 
+```env
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db
+
+# Redis
+REDIS_URL=redis://host:port/db
+
+# Storage (configured by setup wizard)
+STORAGE_ROOT=/path/to/storage
+IMAGES_DIR=${STORAGE_ROOT}/images
+THUMBNAILS_DIR=${STORAGE_ROOT}/thumbnails
+CROPS_DIR=${STORAGE_ROOT}/crops
+ARCHIVES_DIR=${STORAGE_ROOT}/archives
+```
+
+### Optional Settings
+
+```env
+# API
+API_HOST=0.0.0.0
+API_PORT=8002
+CORS_ORIGINS=["http://localhost:3000"]
+
+# Caption Generation
+CAPTION_GENERATOR=dummy  # dummy, unsloth, openai
+UNSLOTH_MODEL_PATH=/path/to/model
+
+# Caching
+IMAGE_CACHE_SIZE_MB=10240
+METADATA_CACHE_TTL_SECONDS=3600
+
+# Thumbnails
+THUMBNAIL_SMALL_SIZE=256
+THUMBNAIL_MEDIUM_SIZE=512
+THUMBNAIL_LARGE_SIZE=1024
+```
+
+## 🗄️ Database Schema
+
+### Core Tables
+
+- **photosets**: Photoset metadata
+- **images**: Image records
+- **captions**: Generated/manual captions
+- **crops**: Crop parameters
+- **tags**: Tag definitions
+- **photoset_tags**: Photoset-tag relationships
+- **image_tags**: Image-tag relationships
+- **thumbnails**: Thumbnail metadata
+- **embeddings**: Future: embedding vectors
+
+### Migrations
+
+Create a new migration:
 ```bash
-pytest
+alembic revision --autogenerate -m "description"
 ```
 
-With coverage report:
-
+Apply migrations:
 ```bash
-pytest --cov=src --cov-report=html
+alembic upgrade head
 ```
 
-## API Documentation
-
-Once running, visit:
-- Swagger UI: `http://localhost:8002/docs`
-- ReDoc: `http://localhost:8002/redoc`
-
-## Project Structure
-
-```
-v2_migration/
-├── src/                  # Application source code
-│   ├── api/             # API routes and middleware
-│   ├── core/            # Configuration and core utilities
-│   ├── models/          # Database and Pydantic models
-│   ├── repositories/    # Data access layer
-│   ├── services/        # Business logic
-│   └── caption_generators/  # Pluggable caption system
-├── scripts/             # Migration and utility scripts
-├── tests/               # Test suite
-├── migrations/          # Alembic database migrations
-├── setup/              # Installation and setup scripts
-└── storage/            # Runtime storage (created by wizard)
+Rollback:
+```bash
+alembic downgrade -1
 ```
 
-## Development
+## 🧪 Testing
 
-### Running Tests
+### Run Tests
 
 ```bash
 # All tests
 pytest
 
-# Unit tests only
-pytest -m unit
-
-# Integration tests
-pytest -m integration
-
 # With coverage
-pytest --cov=src --cov-report=term-missing
+pytest --cov=src --cov-report=html
+
+# Specific module
+pytest tests/unit/services/
 ```
 
-### Code Quality
+### Test Structure
+
+```
+tests/
+├── unit/              # Unit tests
+│   ├── services/
+│   ├── repositories/
+│   └── caption_generators/
+├── integration/       # Integration tests
+│   ├── api/
+│   └── database/
+├── fixtures/          # Test fixtures
+└── conftest.py        # Pytest configuration
+```
+
+## 📦 Dependencies
+
+### Production
+
+```
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.28.0
+alembic>=1.11.0
+redis[hiredis]>=5.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+pillow>=10.0.0
+python-multipart
+```
+
+### Development
+
+```
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+black>=23.7.0
+isort>=5.12.0
+mypy>=1.5.0
+factory-boy>=3.3.0
+```
+
+## 🛠️ Development
+
+### Code Style
 
 ```bash
 # Format code
-black src tests
-
-# Sort imports
-isort src tests
-
-# Lint
-flake8 src tests
+black src/
+isort src/
 
 # Type checking
-mypy src
+mypy src/
 ```
 
-### Database Migrations
+### Adding a New Service
+
+1. Create service in `src/services/`
+2. Add dependency injection in `src/api/dependencies.py`
+3. Create routes in `src/api/routes/`
+4. Write tests in `tests/unit/services/`
+
+### Adding a Caption Generator
+
+1. Create class in `src/caption_generators/`
+2. Inherit from `BaseCaptionGenerator`
+3. Implement `generate_caption()` and `stream_caption()`
+4. Register in `caption_generators/__init__.py`
+
+## 🔍 Troubleshooting
+
+### Database Connection Issues
 
 ```bash
-# Create new migration
-alembic revision --autogenerate -m "Description"
+# Test PostgreSQL connection
+psql -U postgres -h localhost -p 5432 -d gallery_v2
 
-# Apply migrations
-alembic upgrade head
-
-# Rollback
-alembic downgrade -1
+# Check if database exists
+psql -U postgres -l | grep gallery_v2
 ```
 
-## License
+### Redis Connection Issues
+
+```bash
+# Test Redis connection
+redis-cli ping
+
+# Windows (Memurai)
+memurai-cli ping
+```
+
+### Migration Issues
+
+```bash
+# Check current migration
+alembic current
+
+# View migration history
+alembic history
+
+# Force stamp to specific version
+alembic stamp head
+```
+
+## 📖 Additional Documentation
+
+- [Windows Setup Guide](WINDOWS_SETUP_GUIDE.md) - Detailed Windows installation
+- [Architecture Plan](v2-database-migration-architecture.plan.md) - Full architecture
+- [Bug Fixes](BUGFIX_METADATA.md) - Known issues and fixes
+
+## 🤝 Contributing
+
+### Development Workflow
+
+1. Create a feature branch
+2. Implement changes with tests
+3. Run tests and linting
+4. Submit pull request
+
+### Code Quality
+
+- Write comprehensive tests
+- Follow PEP 8 style guide
+- Use type hints
+- Document public APIs
+
+## 📄 License
 
 [Your License Here]
 
-## Support
+## 🙏 Acknowledgments
 
-For issues and questions, please open an issue on GitHub.
+- FastAPI for the excellent async web framework
+- SQLAlchemy for robust ORM capabilities
+- Pillow for image processing
 
+---
 
+**Status**: Phase 2 Complete ✅
+- ✅ Service Layer Implementation
+- ✅ API Routes (Core Endpoints)
+- ✅ Database Models & Migrations
+- ✅ Repository Pattern
+- ✅ Pluggable Caption Generators
+- 🚧 Testing Framework
+- 🚧 Data Migration Scripts
+- 📝 Documentation (In Progress)

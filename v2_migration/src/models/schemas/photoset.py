@@ -1,8 +1,11 @@
 """Photoset Pydantic schemas."""
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from __future__ import annotations
+
+from datetime import date as DateType, datetime
+from typing import Any, Dict, List, Optional
 from uuid import UUID
+
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class PhotosetBase(BaseModel):
@@ -10,59 +13,33 @@ class PhotosetBase(BaseModel):
     
     name: str = Field(..., min_length=1, max_length=255, description="Photoset name")
     source_url: Optional[str] = Field(default=None, description="Source URL")
-    date: Optional[date] = Field(default=None, description="Photoset date")
+    date: Optional[DateType] = Field(default=None, description="Photoset date")
     year: Optional[int] = Field(default=None, ge=1900, le=2100, description="Year")
     original_archive_filename: Optional[str] = Field(default=None, description="Original archive filename")
     extra_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class PhotosetCreate(PhotosetBase):
-    """Schema for creating a new photoset."""
+    """Schema for creating a photoset."""
     pass
 
 
 class PhotosetUpdate(BaseModel):
     """Schema for updating a photoset."""
     
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    source_url: Optional[str] = None
-    date: Optional[date] = None
+    name: Optional[str] = Field(default=None, max_length=255)
+    source_url: Optional[str] = Field(default=None)
     year: Optional[int] = Field(default=None, ge=1900, le=2100)
-    original_archive_filename: Optional[str] = None
-    extra_metadata: Optional[Dict[str, Any]] = None
+    extra_metadata: Optional[Dict[str, Any]] = Field(default=None)
 
 
 class PhotosetResponse(PhotosetBase):
-    """Schema for photoset responses."""
+    """Schema for photoset response."""
     
-    id: UUID
-    created_at: datetime
-    updated_at: datetime
-    image_count: Optional[int] = Field(default=0, description="Number of images in photoset")
-    tags: List[str] = Field(default_factory=list, description="Associated tags")
+    id: UUID = Field(..., description="Photoset UUID")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    image_count: int = Field(default=0, description="Number of images")
+    tags: List[str] = Field(default_factory=list, description="Photoset tags")
     
-    class Config:
-        from_attributes = True
-
-
-class PhotosetListResponse(BaseModel):
-    """Schema for paginated photoset list."""
-    
-    photosets: List[PhotosetResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
-    
-    class Config:
-        from_attributes = True
-
-
-class PhotosetExtractRequest(BaseModel):
-    """Request to extract photoset from archive."""
-    
-    extract_images: bool = Field(default=True, description="Extract images from archive")
-    generate_thumbnails: bool = Field(default=True, description="Generate thumbnails")
-    import_metadata: bool = Field(default=True, description="Import metadata if available")
-
-
+    model_config = ConfigDict(from_attributes=True)

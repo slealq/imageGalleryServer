@@ -1,57 +1,38 @@
 """Caption Pydantic schemas."""
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
 from uuid import UUID
+
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class CaptionBase(BaseModel):
-    """Base caption schema with common fields."""
+    """Base caption schema."""
     
-    caption: str = Field(..., min_length=1, description="Caption text")
-    generator_type: str = Field(default="manual", max_length=50, description="Generator type")
-    generator_metadata: Dict[str, Any] = Field(default_factory=dict, description="Generator metadata")
+    caption: str = Field(..., description="Caption text")
+    generator_type: str = Field(default="manual", description="Type of generator used")
 
 
-class CaptionCreate(BaseModel):
-    """Schema for creating a new caption."""
-    
-    image_id: UUID = Field(..., description="Image ID")
-    caption: str = Field(..., min_length=1, description="Caption text")
-    generator_type: str = Field(default="manual", max_length=50)
-    generator_metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class CaptionUpdate(BaseModel):
-    """Schema for updating a caption."""
-    
-    caption: Optional[str] = Field(default=None, min_length=1)
-    generator_type: Optional[str] = Field(default=None, max_length=50)
-    generator_metadata: Optional[Dict[str, Any]] = None
-
-
-class CaptionResponse(CaptionBase):
-    """Schema for caption responses."""
-    
-    id: UUID
-    image_id: UUID
-    created_at: datetime
-    updated_at: datetime
-    
-    class Config:
-        from_attributes = True
+class CaptionCreate(CaptionBase):
+    """Schema for creating/updating a caption."""
+    pass
 
 
 class CaptionGenerateRequest(BaseModel):
-    """Request to generate a caption."""
+    """Schema for caption generation request."""
     
-    prompt: Optional[str] = Field(
-        default=None,
-        description="Optional prompt to guide caption generation"
-    )
-    generator_type: Optional[str] = Field(
-        default=None,
-        description="Override default generator type"
-    )
+    prompt: Optional[str] = Field(default=None, description="Optional prompt to guide generation")
 
 
+class CaptionResponse(CaptionBase):
+    """Schema for caption response."""
+    
+    id: UUID = Field(..., description="Caption UUID")
+    image_id: UUID = Field(..., description="Image UUID")
+    generator_metadata: Dict[str, Any] = Field(default_factory=dict, description="Generator metadata")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    
+    model_config = ConfigDict(from_attributes=True)

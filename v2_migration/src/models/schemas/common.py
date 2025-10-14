@@ -1,6 +1,8 @@
 """Common Pydantic schemas used across the application."""
+from __future__ import annotations
+
 from typing import Generic, List, TypeVar, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 
 
@@ -23,8 +25,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     page_size: int
     total_pages: int
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class IDResponse(BaseModel):
@@ -32,8 +33,7 @@ class IDResponse(BaseModel):
     
     id: UUID
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MessageResponse(BaseModel):
@@ -41,8 +41,7 @@ class MessageResponse(BaseModel):
     
     message: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FilterParams(BaseModel):
