@@ -1,7 +1,7 @@
 """Image service for managing images."""
 import io
 from pathlib import Path
-from typing import List, Optional, BinaryIO
+from typing import List, Optional, BinaryIO, Tuple
 from uuid import UUID
 from PIL import Image as PILImage
 
@@ -13,6 +13,7 @@ from src.models.schemas.common import FilterParams, PaginationParams
 from src.repositories import ImageRepository
 from src.services.storage_service import StorageService
 from src.services.cache_service import CacheService
+from src.services.thumbnail_service import ThumbnailService
 
 
 class ImageService:
@@ -36,6 +37,7 @@ class ImageService:
         self.storage = storage
         self.cache = cache
         self.repo = ImageRepository(db)
+        self.thumbnail_service = ThumbnailService(db, storage, cache)
     
     async def get_image(self, image_id: UUID) -> Image:
         """
@@ -282,4 +284,65 @@ class ImageService:
         await self.cache.delete_metadata(f"image:{image_id}")
         
         return updated
+    
+    async def get_images(
+        self,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Image]:
+        """
+        Get paginated list of images.
+        
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of images
+        """
+        return await self.repo.get_all(skip=skip, limit=limit)
+    
+    async def get_images_by_photoset(
+        self,
+        photoset_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Image]:
+        """
+        Get images in a photoset.
+        
+        Args:
+            photoset_id: Photoset UUID
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of images
+        """
+        return await self.repo.get_by_photoset(photoset_id, skip=skip, limit=limit)
+    
+    async def count_images(self) -> int:
+        """Get total number of images."""
+        return await self.repo.count()
+    
+    async def count_images_by_photoset(self, photoset_id: UUID) -> int:
+        """Get number of images in a photoset."""
+        return await self.repo.count_by_photoset(photoset_id)
+    
+    async def get_thumbnail_data(
+        self,
+        image_id: UUID,
+        generate_if_missing: bool = True
+    ) -> Optional[bytes]:
+        """
+        Get thumbnail data for an image.
+        
+        Args:
+            image_id: Image UUID
+            generate_if_missing: Generate thumbnail if it doesn't exist
+            
+        Returns:
+            Thumbnail bytes or None
+        """
+        return await self.thumbnail_service.get_thumbnail_data(image_id)
 

@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import Caption
@@ -81,5 +81,18 @@ class CaptionRepository(BaseRepository[Caption]):
         if caption:
             return await self.delete(caption.id)
         return False
+    
+    async def count(self) -> int:
+        """
+        Count total captions.
+        
+        Returns:
+            Total number of captions
+        """
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(Caption)
+        )
+        return result.scalar_one()
 
 

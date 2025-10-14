@@ -1,5 +1,7 @@
 """Main FastAPI application."""
 import sys
+import logging
+import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -7,13 +9,26 @@ from contextlib import asynccontextmanager
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from src.core.config import settings
 from src.core.database import close_db
 from src.api.middleware import RequestTimingMiddleware
 from src.api.routes import api_router
+
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('app.log')
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -40,8 +55,39 @@ app = FastAPI(
     title="Image Gallery API v2",
     description="Database-backed image gallery with photosets, captions, crops, and tags",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    debug=True  # Enable debug mode to show more error details
 )
+
+# Global exception handler to catch and log all unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled exceptions and log them with full traceback."""
+    logger.error(f"Unhandled exception on {request.method} {request.url}")
+    logger.error(f"Exception type: {type(exc).__name__}")
+    logger.error(f"Exception message: {str(exc)}")
+    logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    
+    # Return a proper error response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "traceback": traceback.format_exc().split('\n') if settings.log_level == "DEBUG" else None
+        }
+    )
+
+# HTTP exception handler for more details
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with logging."""
+    logger.warning(f"HTTP {exc.status_code} on {request.method} {request.url}: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
 # Add CORS middleware
 app.add_middleware(

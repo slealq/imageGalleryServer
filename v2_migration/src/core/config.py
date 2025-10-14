@@ -57,17 +57,16 @@ class Settings(BaseSettings):
         description="Metadata cache TTL in seconds"
     )
     
-    # Thumbnails
-    thumbnail_small_size: int = Field(default=256, description="Small thumbnail size")
-    thumbnail_medium_size: int = Field(default=512, description="Medium thumbnail size")
-    thumbnail_large_size: int = Field(default=1024, description="Large thumbnail size")
+    # Thumbnails (scaled down for browsing, maintains aspect ratio)
+    thumbnail_max_dimension: int = Field(default=512, description="Max width or height for thumbnails")
+    thumbnail_quality: int = Field(default=75, description="JPEG quality (1-100, lower = smaller file)")
     
     # Performance
     max_workers: int = Field(default=4, description="Max worker threads")
     prefetch_pages: int = Field(default=2, description="Number of pages to prefetch")
     
     # Logging
-    log_level: str = Field(default="INFO", description="Logging level")
+    log_level: str = Field(default="DEBUG", description="Logging level")
     log_file: Optional[Path] = Field(default=None, description="Log file path")
     
     # Future: Embeddings

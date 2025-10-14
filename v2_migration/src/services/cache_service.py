@@ -66,38 +66,49 @@ class CacheService:
     
     # Thumbnail caching
     
-    async def get_thumbnail(self, image_id: UUID, size: str) -> Optional[bytes]:
+    async def get_thumbnail(self, image_id: UUID) -> Optional[bytes]:
         """
         Get cached thumbnail data.
         
         Args:
             image_id: Image UUID
-            size: Thumbnail size
             
         Returns:
             Thumbnail bytes or None if not cached
         """
         try:
-            key = f"thumbnail:{image_id}:{size}"
+            key = f"thumbnail:{image_id}"
             return await self.redis.get_bytes(key)
         except Exception as e:
             print(f"Cache get error: {e}")
             return None
     
-    async def set_thumbnail(self, image_id: UUID, size: str, thumbnail_data: bytes):
+    async def set_thumbnail(self, image_id: UUID, thumbnail_data: bytes):
         """
         Cache thumbnail data.
         
         Args:
             image_id: Image UUID
-            size: Thumbnail size
             thumbnail_data: Thumbnail binary data
         """
         try:
-            key = f"thumbnail:{image_id}:{size}"
+            key = f"thumbnail:{image_id}"
             await self.redis.set_bytes(key, thumbnail_data)
         except Exception as e:
             print(f"Cache set error: {e}")
+    
+    async def delete_thumbnail(self, image_id: UUID):
+        """
+        Delete cached thumbnail data.
+        
+        Args:
+            image_id: Image UUID
+        """
+        try:
+            key = f"thumbnail:{image_id}"
+            await self.redis.delete(key)
+        except Exception as e:
+            print(f"Cache delete error: {e}")
     
     # Metadata caching
     

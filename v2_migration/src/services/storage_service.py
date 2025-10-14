@@ -46,20 +46,17 @@ class StorageService:
         photoset_dir.mkdir(parents=True, exist_ok=True)
         return photoset_dir / filename
     
-    def get_thumbnail_path(self, image_id: UUID, size: str) -> Path:
+    def get_thumbnail_path(self, image_id: UUID) -> Path:
         """
         Get the full path for a thumbnail file.
         
         Args:
             image_id: Image UUID
-            size: Thumbnail size name (small, medium, large)
             
         Returns:
             Full path to thumbnail file
         """
-        image_dir = self.thumbnails_dir / str(image_id)
-        image_dir.mkdir(parents=True, exist_ok=True)
-        return image_dir / f"{size}.jpg"
+        return self.thumbnails_dir / f"{image_id}.jpg"
     
     def get_crop_path(self, image_id: UUID) -> Path:
         """

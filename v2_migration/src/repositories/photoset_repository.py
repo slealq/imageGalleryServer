@@ -134,5 +134,21 @@ class PhotosetRepository(BaseRepository[Photoset]):
             .where(Photoset.original_archive_filename == filename)
         )
         return result.scalar_one_or_none()
+    
+    async def get_by_name(self, name: str) -> Optional[Photoset]:
+        """
+        Get photoset by name.
+        
+        Args:
+            name: Photoset name
+            
+        Returns:
+            Photoset or None
+        """
+        result = await self.db.execute(
+            select(Photoset)
+            .where(Photoset.name == name)
+        )
+        return result.scalar_one_or_none()
 
 

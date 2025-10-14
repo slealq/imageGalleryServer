@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.database import Crop
@@ -85,5 +85,18 @@ class CropRepository(BaseRepository[Crop]):
         if crop:
             return await self.delete(crop.id)
         return False
+    
+    async def count(self) -> int:
+        """
+        Count total crops.
+        
+        Returns:
+            Total number of crops
+        """
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(Crop)
+        )
+        return result.scalar_one()
 
 

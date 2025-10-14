@@ -318,6 +318,177 @@ Rollback:
 alembic downgrade -1
 ```
 
+## 📦 Data Migration
+
+If you're migrating from the old file-based system, use these scripts to import your existing data.
+
+### Overview
+
+The migration process consists of three main steps:
+
+1. **Extract Archives**: Extract ZIP/RAR photoset files into organized storage
+2. **Import Metadata**: Parse JSON metadata files and populate the database
+3. **Generate Thumbnails**: Create thumbnail images for all imported photos
+
+### Quick Migration
+
+Use the bootstrap script to run the entire migration:
+
+```bash
+# Dry run to preview what will happen
+python scripts/bootstrap_data.py --dry-run --archives "D:\old_archives" --metadata "D:\old_metadata"
+
+# Actual migration
+python scripts/bootstrap_data.py --archives "D:\old_archives" --metadata "D:\old_metadata"
+```
+
+### Step-by-Step Migration
+
+If you prefer to run each step individually:
+
+#### 1. Extract Archives
+
+Extract ZIP/RAR files containing photoset images:
+
+```bash
+# Extract archives from a specific directory
+python scripts/extract_archives.py --source "D:\photosets_archives"
+
+# Dry run to preview
+python scripts/extract_archives.py --source "D:\photosets_archives" --dry-run
+```
+
+This will:
+- Find all `.zip` and `.rar` files in the source directory
+- Extract only image files (jpg, png, gif, webp, etc.)
+- Organize extracted images into `{IMAGES_DIR}/{photoset_name}/`
+- Skip photosets that have already been extracted
+
+#### 2. Import Metadata
+
+Import photoset metadata from JSON files into the database:
+
+```bash
+# Import from metadata directory
+python scripts/import_metadata.py --source "D:\photoset_metadata"
+
+# Dry run to preview
+python scripts/import_metadata.py --source "D:\photoset_metadata" --dry-run
+```
+
+This will:
+- Read all JSON files from the source directory
+- Create photoset records in the database
+- Link images to photosets
+- Import tags and actors
+- Skip photosets that already exist
+
+**Expected JSON format:**
+```json
+{
+  "url": "https://example.com/photoset",
+  "date": "2024-01-15",
+  "year": 2024,
+  "original_filename": "photoset_archive.zip",
+  "actors": ["Actor Name"],
+  "tags": ["tag1", "tag2"]
+}
+```
+
+#### 3. Generate Thumbnails
+
+Generate thumbnails for all images in the database:
+
+```bash
+# Generate thumbnails for all images
+python scripts/generate_thumbnails.py
+
+# Force regenerate even if thumbnails exist
+python scripts/generate_thumbnails.py --force
+
+# Process in larger batches (default is 100)
+python scripts/generate_thumbnails.py --batch-size 200
+```
+
+This will:
+- Generate 3 sizes for each image: small (256px), medium (512px), large (1024px)
+- Store thumbnails in `{THUMBNAILS_DIR}/{image_id}/{size}.jpg`
+- Skip images that already have thumbnails (unless `--force` is used)
+- Process images in batches for better performance
+
+#### 4. Verify Migration
+
+Verify that the migration completed successfully:
+
+```bash
+python scripts/verify_migration.py
+```
+
+This will check:
+- Database record counts (photosets, images, captions, crops, tags)
+- File existence (verify images exist on disk)
+- Thumbnail coverage
+- Database relationship integrity
+- Storage directory structure
+
+### Migration Options
+
+**Bootstrap Script Options:**
+- `--dry-run`: Preview changes without modifying anything
+- `--skip-extraction`: Skip archive extraction (if already done)
+- `--skip-thumbnails`: Skip thumbnail generation
+- `--archives PATH`: Path to archive directory
+- `--metadata PATH`: Path to metadata JSON directory
+
+**Resumability:**
+All migration scripts are designed to be resumable:
+- They skip items that have already been processed
+- They can be safely interrupted and rerun
+- They won't create duplicates
+
+### Example: Complete Migration Workflow
+
+```bash
+# 1. Run a dry run first to verify everything
+python scripts/bootstrap_data.py --dry-run \
+  --archives "D:\old_data\archives" \
+  --metadata "D:\old_data\metadata"
+
+# 2. Run the actual migration
+python scripts/bootstrap_data.py \
+  --archives "D:\old_data\archives" \
+  --metadata "D:\old_data\metadata"
+
+# 3. Verify migration completed successfully
+python scripts/verify_migration.py
+
+# 4. Start the server
+python src/main.py
+```
+
+### Troubleshooting Migration
+
+**No archives found:**
+- Verify the `--archives` path exists and contains `.zip` or `.rar` files
+- Check file permissions
+
+**No metadata files found:**
+- Verify the `--metadata` path exists and contains `.json` files
+- Check that JSON files are named to match photoset names
+
+**Images not found during metadata import:**
+- Make sure you run extract_archives.py first
+- Verify that photoset names match between archives and metadata files
+
+**Thumbnails not generating:**
+- Check that images exist in the database (run import_metadata.py first)
+- Verify PIL/Pillow can open the image files
+- Check disk space in the thumbnails directory
+
+**RAR extraction fails:**
+- Install WinRAR or unrar: `choco install winrar`
+- Or extract RAR files manually and convert to ZIP
+
 ## 🧪 Testing
 
 ### Quick Start

@@ -1,13 +1,13 @@
 """Photoset service for managing photosets."""
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import NotFoundException
-from src.models.database import Photoset
+from src.models.database import Photoset, Image
 from src.models.schemas.common import PaginationParams
-from src.repositories import PhotosetRepository
+from src.repositories import PhotosetRepository, ImageRepository
 from src.services.storage_service import StorageService
 
 
@@ -29,6 +29,7 @@ class PhotosetService:
         self.db = db
         self.storage = storage
         self.repo = PhotosetRepository(db)
+        self.image_repo = ImageRepository(db)
     
     async def get_photoset(self, photoset_id: UUID) -> Photoset:
         """
@@ -200,4 +201,89 @@ class PhotosetService:
         )
         
         return photosets, len(photosets)
+    
+    async def get_photosets(
+        self,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[Photoset]:
+        """
+        Get paginated list of photosets.
+        
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of photosets
+        """
+        return await self.repo.get_all(skip=skip, limit=limit)
+    
+    async def get_photosets_by_year(
+        self,
+        year: int,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[Photoset]:
+        """
+        Get photosets by year.
+        
+        Args:
+            year: Year to filter by
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of photosets
+        """
+        return await self.repo.get_by_year(year, skip=skip, limit=limit)
+    
+    async def search_photosets(
+        self,
+        name_pattern: str,
+        skip: int = 0,
+        limit: int = 50
+    ) -> List[Photoset]:
+        """
+        Search photosets by name pattern.
+        
+        Args:
+            name_pattern: Name pattern to search for
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of matching photosets
+        """
+        return await self.repo.search_by_name(name_pattern, skip=skip, limit=limit)
+    
+    async def count_photosets(self) -> int:
+        """Get total number of photosets."""
+        return await self.repo.count()
+    
+    async def get_photoset_images(
+        self,
+        photoset_id: UUID,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Image]:
+        """
+        Get paginated list of images in a photoset.
+        
+        Args:
+            photoset_id: Photoset UUID
+            skip: Number of records to skip
+            limit: Maximum number of records
+            
+        Returns:
+            List of images
+            
+        Raises:
+            NotFoundException: If photoset not found
+        """
+        # Verify photoset exists
+        if not await self.repo.get_by_id(photoset_id):
+            raise NotFoundException("Photoset", str(photoset_id))
+        
+        return await self.image_repo.get_by_photoset(photoset_id, skip=skip, limit=limit)
 

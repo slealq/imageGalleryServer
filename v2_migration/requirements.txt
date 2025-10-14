@@ -17,6 +17,7 @@ hiredis==2.2.3
 # Image processing
 Pillow==10.1.0
 numpy==1.26.2
+rarfile==4.1
 
 # Utilities
 python-dotenv==1.0.0
