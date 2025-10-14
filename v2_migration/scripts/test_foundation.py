@@ -124,12 +124,17 @@ async def test_database_schema():
     
     try:
         from src.core.database import engine
-        from sqlalchemy import text, inspect
+        from sqlalchemy import text
         
+        # Check for tables using a SQL query instead of inspector
         async with engine.connect() as conn:
-            # Check if tables exist
-            inspector = inspect(engine.sync_engine)
-            tables = inspector.get_table_names()
+            result = await conn.execute(text("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """))
+            tables = [row[0] for row in result.fetchall()]
             
             expected_tables = [
                 'photosets', 'images', 'captions', 'crops', 
@@ -183,7 +188,7 @@ async def test_models_and_repositories():
             test_photoset = Photoset(
                 name="Test Photoset",
                 year=2024,
-                metadata={"test": True}
+                extra_metadata={"test": True}
             )
             created_photoset = await photoset_repo.create(test_photoset)
             console.print(f"[green]✓ Created photoset: {created_photoset.id}[/green]")

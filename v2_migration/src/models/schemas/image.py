@@ -13,7 +13,7 @@ class ImageBase(BaseModel):
     height: Optional[int] = Field(default=None, ge=1, description="Image height in pixels")
     file_size: Optional[int] = Field(default=None, ge=0, description="File size in bytes")
     mime_type: Optional[str] = Field(default=None, max_length=50, description="MIME type")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    extra_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class ImageCreate(ImageBase):
@@ -32,7 +32,7 @@ class ImageUpdate(BaseModel):
     height: Optional[int] = Field(default=None, ge=1)
     file_size: Optional[int] = Field(default=None, ge=0)
     mime_type: Optional[str] = Field(default=None, max_length=50)
-    metadata: Optional[Dict[str, Any]] = None
+    extra_metadata: Optional[Dict[str, Any]] = None
 
 
 class ImageResponse(ImageBase):

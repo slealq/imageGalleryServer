@@ -28,7 +28,7 @@ class Embedding(Base):
     model_name = Column(String(100), nullable=False, index=True)
     vector_dimension = Column(Integer, nullable=False)
     external_vector_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to Qdrant
-    metadata = Column(JSON, default=dict, nullable=False)
+    extra_metadata = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships

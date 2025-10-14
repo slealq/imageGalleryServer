@@ -13,7 +13,7 @@ class PhotosetBase(BaseModel):
     date: Optional[date] = Field(default=None, description="Photoset date")
     year: Optional[int] = Field(default=None, ge=1900, le=2100, description="Year")
     original_archive_filename: Optional[str] = Field(default=None, description="Original archive filename")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    extra_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class PhotosetCreate(PhotosetBase):
@@ -29,7 +29,7 @@ class PhotosetUpdate(BaseModel):
     date: Optional[date] = None
     year: Optional[int] = Field(default=None, ge=1900, le=2100)
     original_archive_filename: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    extra_metadata: Optional[Dict[str, Any]] = None
 
 
 class PhotosetResponse(PhotosetBase):

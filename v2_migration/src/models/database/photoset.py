@@ -25,7 +25,7 @@ class Photoset(Base):
     date = Column(Date, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     original_archive_filename = Column(String(255), nullable=True)
-    metadata = Column(JSON, default=dict, nullable=False)
+    extra_metadata = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

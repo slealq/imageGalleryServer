@@ -31,7 +31,7 @@ class Image(Base):
     height = Column(Integer, nullable=True)
     file_size = Column(BigInteger, nullable=True)
     mime_type = Column(String(50), nullable=True)
-    metadata = Column(JSON, default=dict, nullable=False)
+    extra_metadata = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
