@@ -1,0 +1,9 @@
+{
+  "migration_configured": true,
+  "migration_sources": {
+    "raw_archives_path": "C:\\IGP\\raw_photoset",
+    "metadata_json_path": "C:\\IGP\\photoset_metadata"
+  },
+  "setup_date": "2025-10-13T21:18:32.141941",
+  "wizard_version": "1.0"
+}
