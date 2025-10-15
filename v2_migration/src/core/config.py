@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     )
     
     # Thumbnails (scaled down for browsing, maintains aspect ratio)
-    thumbnail_max_dimension: int = Field(default=512, description="Max width or height for thumbnails")
-    thumbnail_quality: int = Field(default=75, description="JPEG quality (1-100, lower = smaller file)")
+    thumbnail_max_dimension: int = Field(default=1200, description="Max width or height for thumbnails")
+    thumbnail_quality: int = Field(default=100, description="JPEG quality (1-100, lower = smaller file)")
     
     # Performance
     max_workers: int = Field(default=4, description="Max worker threads")

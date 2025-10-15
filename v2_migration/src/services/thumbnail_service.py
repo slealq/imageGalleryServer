@@ -96,16 +96,15 @@ class ThumbnailService:
                 )
                 
                 # Save to storage
-                thumb_path = self.storage.get_thumbnail_path(image_id)
-                thumb_path.parent.mkdir(parents=True, exist_ok=True)
+                thumb_path = self.storage.get_thumbnail_path(image_id, image.photoset_id)
                 
-                # Save with reduced quality for faster loading
+                # Save with high quality - 100% quality is actually faster to encode
                 img.save(
                     thumb_path,
                     'JPEG',
                     quality=self.quality,
-                    optimize=True,
-                    progressive=True  # Progressive JPEGs load faster
+                    optimize=False,  # Disable optimization for speed (100% quality doesn't need it)
+                    progressive=False  # Disable progressive for faster encoding
                 )
                 
                 # Cache thumbnail bytes
