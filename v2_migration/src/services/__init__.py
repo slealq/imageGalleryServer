@@ -7,6 +7,7 @@ from .photoset_service import PhotosetService
 from .caption_service import CaptionService
 from .crop_service import CropService
 from .tag_service import TagService
+from .filters_service import FiltersService
 
 __all__ = [
     "StorageService",
@@ -17,6 +18,7 @@ __all__ = [
     "CaptionService",
     "CropService",
     "TagService",
+    "FiltersService",
 ]
 
 

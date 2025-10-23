@@ -150,5 +150,20 @@ class PhotosetRepository(BaseRepository[Photoset]):
             .where(Photoset.name == name)
         )
         return result.scalar_one_or_none()
+    
+    async def get_distinct_years(self) -> List[int]:
+        """
+        Get all distinct years from photosets.
+        
+        Returns:
+            List of years (sorted)
+        """
+        result = await self.db.execute(
+            select(Photoset.year)
+            .distinct()
+            .where(Photoset.year.isnot(None))
+            .order_by(Photoset.year)
+        )
+        return list(result.scalars().all())
 
 

@@ -16,6 +16,7 @@ from src.services import (
     CaptionService,
     CropService,
     TagService,
+    FiltersService,
 )
 
 
@@ -91,4 +92,11 @@ async def get_tag_service(
 ) -> TagService:
     """Get tag service."""
     return TagService(db)
+
+
+async def get_filters_service(
+    db: AsyncSession = Depends(get_db),
+) -> FiltersService:
+    """Get filters service."""
+    return FiltersService(db)
 

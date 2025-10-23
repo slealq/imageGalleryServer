@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8002, description="API port")
     api_version: str = Field(default="v2", description="API version")
     cors_origins: List[str] = Field(
-        default=["http://localhost:3000"], 
+        default=[
+            "http://localhost:3000",
+            "http://localhost:4322",
+            "http://localhost:8000",
+        ], 
         description="CORS allowed origins"
     )
     

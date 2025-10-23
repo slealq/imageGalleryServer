@@ -54,35 +54,63 @@ class ImageService:
         """
         return await self.repo.get_by_id_or_fail(image_id)
     
-    async def get_image_data(self, image_id: UUID, use_cache: bool = True) -> bytes:
+    async def get_image_data(self, image_id: UUID, use_cache: bool = True) -> tuple[bytes, dict]:
         """
-        Get image file data.
+        Get image file data with cache diagnostics.
         
         Args:
             image_id: Image UUID
             use_cache: Whether to use cache
             
         Returns:
-            Image bytes
+            Tuple of (Image bytes, diagnostics dict with cache_hit, timings, etc.)
             
         Raises:
             NotFoundException: If image not found
         """
+        import time
+        
+        diagnostics = {
+            "cache_hit": False,
+            "cache_enabled": use_cache,
+            "cache_check_time_ms": 0,
+            "db_lookup_time_ms": 0,
+            "file_read_time_ms": 0,
+            "image_processing_time_ms": 0,
+            "cache_write_time_ms": 0,
+            "total_time_ms": 0
+        }
+        
+        start_total = time.time()
+        
         # Try cache first
         if use_cache:
+            cache_start = time.time()
             cached = await self.cache.get_image(image_id)
+            diagnostics["cache_check_time_ms"] = round((time.time() - cache_start) * 1000, 2)
+            
             if cached:
-                return cached
+                diagnostics["cache_hit"] = True
+                diagnostics["total_time_ms"] = round((time.time() - start_total) * 1000, 2)
+                return cached, diagnostics
         
         # Get from storage
+        db_start = time.time()
         image = await self.repo.get_by_id_or_fail(image_id)
+        diagnostics["db_lookup_time_ms"] = round((time.time() - db_start) * 1000, 2)
+        
         image_path = self.storage.images_dir / image.file_path
         
         if not image_path.exists():
             raise NotFoundException("Image file", str(image_id))
         
-        # Read and optionally optimize
+        # Read file
+        read_start = time.time()
         with PILImage.open(image_path) as img:
+            diagnostics["file_read_time_ms"] = round((time.time() - read_start) * 1000, 2)
+            
+            # Convert and process
+            process_start = time.time()
             # Convert to RGB if needed
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
@@ -92,12 +120,16 @@ class ImageService:
             img.save(output, format='JPEG', quality=85, optimize=True)
             output.seek(0)
             image_data = output.getvalue()
+            diagnostics["image_processing_time_ms"] = round((time.time() - process_start) * 1000, 2)
         
         # Cache for next time
         if use_cache:
+            cache_write_start = time.time()
             await self.cache.set_image(image_id, image_data)
+            diagnostics["cache_write_time_ms"] = round((time.time() - cache_write_start) * 1000, 2)
         
-        return image_data
+        diagnostics["total_time_ms"] = round((time.time() - start_total) * 1000, 2)
+        return image_data, diagnostics
     
     async def list_images(
         self,
@@ -345,4 +377,27 @@ class ImageService:
             Thumbnail bytes or None
         """
         return await self.thumbnail_service.get_thumbnail_data(image_id)
+    
+    async def find_image_by_string_id(self, string_id: str) -> Optional[Image]:
+        """
+        Find image by legacy string ID (for backward compatibility).
+        
+        This method attempts to find an image using a string identifier,
+        which could be a UUID, filename, or part of a filename.
+        
+        Args:
+            string_id: String identifier (UUID, filename, or pattern)
+            
+        Returns:
+            Image model or None
+        """
+        # Try to parse as UUID first
+        try:
+            uuid_id = UUID(string_id)
+            return await self.repo.get_by_id(uuid_id)
+        except ValueError:
+            pass
+        
+        # Try to find by filename pattern
+        return await self.repo.find_by_filename_pattern(string_id)
 

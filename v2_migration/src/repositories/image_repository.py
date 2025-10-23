@@ -210,5 +210,26 @@ class ImageRepository(BaseRepository[Image]):
             .where(Image.photoset_id == photoset_id)
         )
         return result.scalar_one()
+    
+    async def find_by_filename_pattern(self, pattern: str) -> Optional[Image]:
+        """
+        Find image by filename pattern (for legacy string ID support).
+        
+        Args:
+            pattern: Filename pattern (will match against original_filename and file_path)
+            
+        Returns:
+            Image or None
+        """
+        # Try exact match on original_filename first
+        result = await self.db.execute(
+            select(Image).where(
+                or_(
+                    Image.original_filename.like(f"%{pattern}%"),
+                    Image.file_path.like(f"%{pattern}%")
+                )
+            ).limit(1)
+        )
+        return result.scalar_one_or_none()
 
 

@@ -79,14 +79,17 @@ async def get_image_file(
     image_id: UUID,
     image_service: ImageService = Depends(get_image_service)
 ):
-    """Get image file."""
+    """Get image file with cache diagnostics."""
     try:
-        image_data = await image_service.get_image_data(image_id)
+        image_data, diagnostics = await image_service.get_image_data(image_id)
+        
         return Response(
             content=image_data,
             media_type="image/jpeg",
             headers={
                 "Cache-Control": "public, max-age=31536000",
+                "X-Cache-Status": "HIT" if diagnostics["cache_hit"] else "MISS",
+                "X-Timing-Backend-Total": str(diagnostics["total_time_ms"]),
             }
         )
     except NotFoundException as e:

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -17,6 +17,10 @@ from src.core.config import settings
 from src.core.database import close_db
 from src.api.middleware import RequestTimingMiddleware
 from src.api.routes import api_router
+from src.api.routes import legacy
+from src.api.dependencies import get_filters_service
+from src.models.schemas.filters import FiltersResponse
+from src.services import FiltersService
 
 # Configure detailed logging
 # Note: File logging disabled during development to prevent reload loops
@@ -89,11 +93,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"detail": exc.detail}
     )
 
-# Add CORS middleware
+# Add CORS middleware - Allow all origins for development
+# Note: allow_credentials cannot be True when allow_origins is ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=False,  # Must be False when using wildcard origin
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,6 +108,9 @@ app.add_middleware(RequestTimingMiddleware)
 
 # Include API routes
 app.include_router(api_router)
+
+# Include legacy routes for backward compatibility
+app.include_router(legacy.router, tags=["legacy"])
 
 
 @app.get("/")
@@ -114,6 +122,29 @@ async def root():
         "docs": "/docs",
         "health": "/api/v2/health"
     }
+
+
+@app.get("/filters", response_model=FiltersResponse)
+async def get_filters(
+    filters_service: FiltersService = Depends(get_filters_service)
+):
+    """
+    Get all available filter options.
+    
+    Returns available actors, tags, and years that can be used to filter images.
+    
+    **Returns:**
+    - **actors**: List of available actor names
+    - **tags**: List of available tag names (excluding actors)
+    - **years**: List of available years from photosets
+    """
+    filters_data = await filters_service.get_available_filters()
+    
+    return FiltersResponse(
+        actors=filters_data["actors"],
+        tags=filters_data["tags"],
+        years=filters_data["years"]
+    )
 
 
 if __name__ == "__main__":
