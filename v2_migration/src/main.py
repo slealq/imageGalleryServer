@@ -19,12 +19,12 @@ from src.api.middleware import RequestTimingMiddleware
 from src.api.routes import api_router
 
 # Configure detailed logging
+# Note: File logging disabled during development to prevent reload loops
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('app.log')
+        logging.StreamHandler(sys.stdout)
     ]
 )
 

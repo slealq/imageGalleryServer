@@ -16,3 +16,7 @@ api_router.include_router(tags.router, tags=["tags"])
 
 __all__ = ["api_router"]
 
+
+
+
+

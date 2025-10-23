@@ -223,3 +223,4 @@ class CropService:
         
         return img.resize(new_size, PILImage.Resampling.LANCZOS)
 
+

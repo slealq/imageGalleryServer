@@ -183,3 +183,4 @@ class CaptionService:
         """
         return await self.caption_repo.delete_by_image_id(image_id)
 
+

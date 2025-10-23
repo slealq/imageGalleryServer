@@ -73,3 +73,7 @@ if __name__ == "__main__":
     if not success:
         print("\nFix database issues before starting the server.")
         sys.exit(1)
+
+
+
+

@@ -171,3 +171,7 @@ class TestCaptionRepository:
         assert updated.id == caption.id  # Same record
         assert updated.caption == "Updated caption"
 
+
+
+
+
